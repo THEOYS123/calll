@@ -1,0 +1,8 @@
+{
+  "name": "Remix OSINT axxosintbot v3",
+  "description": "axxosintbot - OSINT intelligence leak search engine & Telegram bot automation created by Ax. Multi-parameter correlation, remote dataset synchronization (https://fileup.to/5oca/dataset.txt), confidential authorization clearance, and free quota controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
