@@ -15,6 +15,10 @@ import { DatasetManagerPanel } from './components/DatasetManagerPanel';
 import { GroupManagerPanel } from './components/GroupManagerPanel';
 import { ContentModerationPanel } from './components/ContentModerationPanel';
 import { ReferralManagerPanel } from './components/ReferralManagerPanel';
+import { MultiBotManagerPanel } from './components/MultiBotManagerPanel';
+import { MessageTrafficMonitorPanel } from './components/MessageTrafficMonitorPanel';
+import { PricingAndRentalManagerPanel } from './components/PricingAndRentalManagerPanel';
+import { OwnerAccessModal } from './components/OwnerAccessModal';
 import {
   BotStatusState,
   CustomCommand,
@@ -27,10 +31,17 @@ import {
   BotMenuConfig,
   GroupConfig,
   ModerationConfig,
+  ReferralConfig,
+  MultiBotInstance,
+  BotRentalPlan,
+  MessageLogEntry,
+  QuotaPricePackage,
   DEFAULT_QUOTA_CONFIG,
   DEFAULT_MENU_CONFIG,
   DEFAULT_MODERATION_CONFIG,
-  DEFAULT_REFERRAL_CONFIG
+  DEFAULT_REFERRAL_CONFIG,
+  DEFAULT_RENTAL_PLANS,
+  DEFAULT_QUOTA_PACKAGES
 } from './types';
 import {
   Power,
@@ -116,16 +127,146 @@ export function App() {
   const [serverConnected, setServerConnected] = useState<boolean>(true);
   const [isToggling, setIsToggling] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'referral' | 'moderation' | 'datasets' | 'groups' | 'osint' | 'history' | 'cmenus' | 'features' | 'messages' | 'commands' | 'logs'
+    | 'overview'
+    | 'multibot'
+    | 'traffic'
+    | 'pricing-manager'
+    | 'referral'
+    | 'moderation'
+    | 'datasets'
+    | 'groups'
+    | 'osint'
+    | 'history'
+    | 'cmenus'
+    | 'features'
+    | 'messages'
+    | 'commands'
+    | 'logs'
   >('overview');
   const [guideModalOpen, setGuideModalOpen] = useState<boolean>(false);
   const [netlifyModalOpen, setNetlifyModalOpen] = useState<boolean>(false);
+  const [ownerModalOpen, setOwnerModalOpen] = useState<boolean>(false);
+  const [isOwnerUnlocked, setIsOwnerUnlocked] = useState<boolean>(() => {
+    return !!localStorage.getItem('owner_passkey_session');
+  });
   const [prefilledChatId, setPrefilledChatId] = useState<number | string | undefined>(undefined);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Owner Unlock Handler
+  const handleUnlockOwner = async (passkey: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/owner/verify-passkey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ passkey })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsOwnerUnlocked(true);
+        return true;
+      }
+      return false;
+    } catch {
+      // Fallback local check
+      const expected = status.ownerWebsitePasskey || 'ax0895';
+      if (passkey.trim().toLowerCase() === expected.trim().toLowerCase()) {
+        setIsOwnerUnlocked(true);
+        return true;
+      }
+      return false;
+    }
+  };
+
+  // Owner Update Passkey Handler
+  const handleUpdateOwnerPasskey = async (oldKey: string, newKey: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/owner/update-passkey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ oldPasskey: oldKey, newPasskey: newKey })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatus((prev) => ({ ...prev, ownerWebsitePasskey: newKey }));
+        return { success: true, message: data.message };
+      }
+      return { success: false, message: data.message || 'Gagal mengubah kata kunci' };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  // Pricing & Rental Save All Handler
+  const handleSavePricing = async (payload: {
+    rentalPlans: BotRentalPlan[];
+    quotaPackages: QuotaPricePackage[];
+    quotaConfig: QuotaConfig;
+    referralConfig: ReferralConfig;
+  }): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/pricing/save-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatus((prev) => ({
+          ...prev,
+          rentalPlans: payload.rentalPlans,
+          quotaPackages: payload.quotaPackages,
+          quotaConfig: payload.quotaConfig,
+          referralConfig: payload.referralConfig
+        }));
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      }
+      return { success: false, message: data.message || 'Gagal menyimpan harga & kuota' };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  // Quick Traffic Reply Handler
+  const handleSendTrafficReply = async (
+    botId: string,
+    chatId: number | string,
+    text: string
+  ): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/traffic/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ botId, chatId, text })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      }
+      return { success: false, message: data.message || 'Gagal mengirim balasan' };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  // Clear Traffic Logs
+  const handleClearTrafficLogs = async () => {
+    try {
+      const res = await fetch('/api/traffic/clear', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Riwayat lalu lintas pesan berhasil dibersihkan.', 'success');
+        setStatus((prev) => ({ ...prev, messageLogs: [] }));
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+    }
   };
 
   // Fetch bot status from server safely without throwing or console.error spam
@@ -660,6 +801,122 @@ export function App() {
     }
   };
 
+  // Multi-Bot Handlers
+  const handleAddMultiBot = async (token: string, notes?: string, rentedBy?: string, rentExpiryDate?: string) => {
+    try {
+      const res = await fetch('/api/multibot/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ token, notes, rentedBy, rentExpiryDate })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      } else {
+        showToast(data.message || 'Gagal menambahkan bot', 'error');
+        return { success: false, message: data.message || 'Gagal menambahkan bot' };
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handleToggleMultiBot = async (botId: string, active: boolean) => {
+    try {
+      const res = await fetch('/api/multibot/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ botId, active })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      } else {
+        showToast(data.message || 'Gagal mengubah status bot', 'error');
+        return { success: false, message: data.message };
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handleDeleteMultiBot = async (botId: string) => {
+    try {
+      const res = await fetch('/api/multibot/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ botId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      } else {
+        showToast(data.message || 'Gagal menghapus bot', 'error');
+        return { success: false, message: data.message };
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handleUpdateMultiBot = async (payload: {
+    botId: string;
+    token?: string;
+    notes?: string;
+    rentedBy?: string;
+    rentExpiryDate?: string;
+    isActive?: boolean;
+  }) => {
+    try {
+      const res = await fetch('/api/multibot/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        fetchStatus(false);
+        return { success: true, message: data.message };
+      } else {
+        showToast(data.message || 'Gagal memperbarui data bot', 'error');
+        return { success: false, message: data.message };
+      }
+    } catch (err: any) {
+      showToast(`Error update: ${err.message}`, 'error');
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handleTestPingMultiBot = async (botId: string) => {
+    try {
+      const res = await fetch('/api/multibot/test-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ botId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Ping sukses: ${data.latencyMs} ms`, 'success');
+        return { success: true, latencyMs: data.latencyMs, message: data.message };
+      } else {
+        showToast(data.message || 'Gagal ping', 'error');
+        return { success: false, message: data.message };
+      }
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
   // Switch to Direct Message with Prefilled Chat ID
   const handleSelectUserForChat = (chatId: number) => {
     setPrefilledChatId(chatId);
@@ -682,6 +939,8 @@ export function App() {
         onToggleActive={handleToggleActive}
         isToggling={isToggling}
         onOpenNetlifyModal={() => setNetlifyModalOpen(true)}
+        isOwnerUnlocked={isOwnerUnlocked}
+        onOpenOwnerModal={() => setOwnerModalOpen(true)}
       />
 
       {/* Backend Reconnection Banner / Netlify Mode Indicator */}
@@ -751,6 +1010,60 @@ export function App() {
           >
             <Power className="w-4 h-4" />
             <span>Dashboard Kontrol</span>
+          </button>
+
+          <button
+            id="tab-multibot"
+            onClick={() => setActiveTab('multibot')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'multibot'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Bot className="w-4 h-4 text-cyan-400" />
+            <div className="flex items-center gap-1.5">
+              <span>Multi-Bot Cluster & Sewa</span>
+              <span className="px-1.5 py-0.2 text-[9px] rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold">
+                {(status.botInfo ? 1 : 0) + (status.multiBots?.length || 0)} Bot
+              </span>
+            </div>
+          </button>
+
+          <button
+            id="tab-traffic"
+            onClick={() => setActiveTab('traffic')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'traffic'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Send className="w-4 h-4 text-cyan-400" />
+            <div className="flex items-center gap-1.5">
+              <span>Pemantau Pesan Masuk & Keluar</span>
+              <span className="px-1.5 py-0.2 text-[9px] rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold">
+                {status.messageLogs?.length || 0}
+              </span>
+            </div>
+          </button>
+
+          <button
+            id="tab-pricing-manager"
+            onClick={() => setActiveTab('pricing-manager')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'pricing-manager'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Coins className="w-4 h-4 text-amber-400" />
+            <div className="flex items-center gap-1.5">
+              <span>Atur Harga Sewa Bot & Kuota</span>
+              <span className="px-1.5 py-0.2 text-[9px] rounded bg-amber-500/20 text-amber-300 font-mono font-bold">
+                Tarif
+              </span>
+            </div>
           </button>
 
           <button
@@ -1023,6 +1336,55 @@ export function App() {
           </div>
         )}
 
+        {/* Tab: Multi-Bot Cluster & Sewa Bot Manager */}
+        {activeTab === 'multibot' && (
+          <div className="space-y-6">
+            <MultiBotManagerPanel
+              primaryBotToken={status.token}
+              primaryBotInfo={status.botInfo}
+              isPrimaryActive={status.isActive}
+              multiBots={status.multiBots || []}
+              rentalPlans={status.rentalPlans || DEFAULT_RENTAL_PLANS}
+              onAddBot={handleAddMultiBot}
+              onToggleBot={handleToggleMultiBot}
+              onDeleteBot={handleDeleteMultiBot}
+              onUpdateBot={handleUpdateMultiBot}
+              onTestPing={handleTestPingMultiBot}
+              onRefreshList={() => fetchStatus(false)}
+            />
+          </div>
+        )}
+
+        {/* Tab: Pemantau Pesan Masuk & Keluar Real-time */}
+        {activeTab === 'traffic' && (
+          <div className="space-y-6">
+            <MessageTrafficMonitorPanel
+              messageLogs={status.messageLogs || []}
+              multiBots={status.multiBots || []}
+              primaryBotInfo={status.botInfo}
+              isPrimaryActive={status.isActive}
+              onSendReply={handleSendTrafficReply}
+              onClearLogs={handleClearTrafficLogs}
+              onRefresh={() => fetchStatus(false)}
+              onShowToast={showToast}
+            />
+          </div>
+        )}
+
+        {/* Tab: Atur Harga Sewa Bot & Kuota OSINT */}
+        {activeTab === 'pricing-manager' && (
+          <div className="space-y-6">
+            <PricingAndRentalManagerPanel
+              rentalPlans={status.rentalPlans || DEFAULT_RENTAL_PLANS}
+              quotaPackages={status.quotaPackages || DEFAULT_QUOTA_PACKAGES}
+              quotaConfig={status.quotaConfig || DEFAULT_QUOTA_CONFIG}
+              referralConfig={status.referralConfig || DEFAULT_REFERRAL_CONFIG}
+              onSavePricing={handleSavePricing}
+              onShowToast={showToast}
+            />
+          </div>
+        )}
+
         {/* Tab: Referral & Tabungan Kuota */}
         {activeTab === 'referral' && (
           <div className="space-y-6">
@@ -1063,11 +1425,12 @@ export function App() {
           </div>
         )}
 
-        {/* Tab: Telegram Groups & Anti-Spam Shield */}
+        {/* Tab: Telegram Groups & Anti-Spam Shield & Group Broadcast */}
         {activeTab === 'groups' && (
           <div className="space-y-6">
             <GroupManagerPanel
               groupConfig={status.groupConfig}
+              multiBots={status.multiBots || []}
               isBotActive={status.isActive}
               onShowToast={showToast}
               onRefreshStatus={() => fetchStatus(false)}
@@ -1202,6 +1565,18 @@ export function App() {
         isOpen={netlifyModalOpen}
         onClose={() => setNetlifyModalOpen(false)}
         onConnectCustomBackend={() => fetchStatus(true)}
+      />
+
+      {/* Owner Access Passcode Lock & Settings Modal */}
+      <OwnerAccessModal
+        isOpen={ownerModalOpen}
+        onClose={() => setOwnerModalOpen(false)}
+        isUnlocked={isOwnerUnlocked}
+        onUnlock={handleUnlockOwner}
+        onLock={() => setIsOwnerUnlocked(false)}
+        onUpdatePasskey={handleUpdateOwnerPasskey}
+        currentPasskeyHint={status.ownerWebsitePasskey || 'ax0895'}
+        onShowToast={showToast}
       />
     </div>
   );

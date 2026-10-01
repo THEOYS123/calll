@@ -18,12 +18,17 @@ import {
   HelpCircle,
   Hash,
   Sliders,
-  Sparkles
+  Sparkles,
+  Send,
+  Radio,
+  Bot,
+  Zap
 } from 'lucide-react';
-import { GroupConfig, KnownTelegramGroup } from '../types';
+import { GroupConfig, KnownTelegramGroup, MultiBotInstance } from '../types';
 
 interface GroupManagerPanelProps {
   groupConfig?: GroupConfig;
+  multiBots?: MultiBotInstance[];
   isBotActive: boolean;
   onShowToast: (text: string, type: 'success' | 'error') => void;
   onRefreshStatus: () => void;
@@ -31,6 +36,7 @@ interface GroupManagerPanelProps {
 
 export function GroupManagerPanel({
   groupConfig,
+  multiBots = [],
   isBotActive,
   onShowToast,
   onRefreshStatus
@@ -52,6 +58,15 @@ export function GroupManagerPanel({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [newGroupIdInput, setNewGroupIdInput] = useState<string>('');
   const [newGroupTargetType, setNewGroupTargetType] = useState<'whitelist' | 'blacklist'>('blacklist');
+
+  // Group Broadcast Studio State
+  const [broadcastTarget, setBroadcastTarget] = useState<'groups' | 'all' | 'custom'>('groups');
+  const [broadcastBotId, setBroadcastBotId] = useState<string>('all_cluster');
+  const [broadcastText, setBroadcastText] = useState<string>('');
+  const [customTargetIds, setCustomTargetIds] = useState<string>('');
+  const [pinMessageInGroup, setPinMessageInGroup] = useState<boolean>(false);
+  const [isBroadcasting, setIsBroadcasting] = useState<boolean>(false);
+  const [broadcastResult, setBroadcastResult] = useState<{ total: number; success: number; failed: number } | null>(null);
 
   // Sync props to state if props update
   React.useEffect(() => {
@@ -198,6 +213,48 @@ export function GroupManagerPanel({
     }
   };
 
+  // Execute Broadcast to Groups and Supergroups
+  const handleExecuteBroadcast = async () => {
+    if (!broadcastText.trim()) {
+      onShowToast('Tulis pesan pengumuman / broadcast terlebih dahulu!', 'error');
+      return;
+    }
+
+    setIsBroadcasting(true);
+    setBroadcastResult(null);
+
+    try {
+      const res = await fetch('/api/broadcast/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          target: broadcastTarget,
+          botId: broadcastBotId,
+          text: broadcastText.trim(),
+          customTargetIds: broadcastTarget === 'custom' ? customTargetIds : undefined,
+          pinMessage: pinMessageInGroup
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setBroadcastResult({
+          total: data.total || 0,
+          success: data.successCount || 0,
+          failed: data.failedCount || 0
+        });
+        onShowToast(`📢 Broadcast Selesai! Terkirim ke ${data.successCount} chat (${data.failedCount} gagal).`, 'success');
+        onRefreshStatus();
+      } else {
+        onShowToast(`Gagal broadcast: ${data.message}`, 'error');
+      }
+    } catch (err: any) {
+      onShowToast(`Error broadcast: ${err.message}`, 'error');
+    } finally {
+      setIsBroadcasting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner Header */}
@@ -278,6 +335,160 @@ export function GroupManagerPanel({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Broadcast Studio ke Grup & Supergrup */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl shadow-md">
+              <Radio className="w-5 h-5 text-blue-200" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Studio Broadcast ke Grup & Supergrup</h3>
+              <p className="text-xs text-slate-400">
+                Kirim pesan pengumuman, promosi, atau rilis update ke seluruh grup atau seluruh bot cluster sekaligus.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Target Audience */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1.5">
+              Target Penerima Broadcast:
+            </label>
+            <select
+              value={broadcastTarget}
+              onChange={(e) => setBroadcastTarget(e.target.value as any)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="groups">👥 Semua Grup & Supergrup ({config.knownGroups?.length || 0} Grup Terdaftar)</option>
+              <option value="all">🌐 Seluruh Target (Semua Grup + Seluruh Pengguna DM)</option>
+              <option value="custom">🎯 Target Khusus (Ketik Daftar Chat ID)</option>
+            </select>
+          </div>
+
+          {/* Sending Bot Selector */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1.5">
+              Kirim Menggunakan Bot:
+            </label>
+            <select
+              value={broadcastBotId}
+              onChange={(e) => setBroadcastBotId(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="all_cluster">⚡ Seluruh Bot Aktif Sekaligus (Cluster Broadcast)</option>
+              <option value="primary">👑 Bot Utama Saja</option>
+              {multiBots.map((b, i) => (
+                <option key={b.id} value={b.id}>
+                  🌐 {b.botInfo?.username ? `@${b.botInfo.username}` : `Cluster Bot #${i + 1}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {broadcastTarget === 'custom' && (
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1.5">
+              Daftar Chat ID Target (Pisahkan dengan koma atau baris baru):
+            </label>
+            <textarea
+              rows={2}
+              value={customTargetIds}
+              onChange={(e) => setCustomTargetIds(e.target.value)}
+              placeholder="-1001234567890, -1009876543210, 12345678"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        )}
+
+        {/* Message Input */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-bold text-slate-300">
+              Isi Pesan Broadcast (Format Markdown Telegram Didukung):
+            </label>
+            <div className="flex items-center gap-1.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setBroadcastText((prev) => prev + '*Teks Tebal* ')}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono"
+              >
+                *Tebal*
+              </button>
+              <button
+                type="button"
+                onClick={() => setBroadcastText((prev) => prev + '_Teks Miring_ ')}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono"
+              >
+                _Miring_
+              </button>
+              <button
+                type="button"
+                onClick={() => setBroadcastText((prev) => prev + '`Kode Monospace` ')}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono"
+              >
+                `Kode`
+              </button>
+            </div>
+          </div>
+          <textarea
+            rows={4}
+            value={broadcastText}
+            onChange={(e) => setBroadcastText(e.target.value)}
+            placeholder="📢 *PENGUMUMAN PENTING BOT*\n━━━━━━━━━━━━━━━━━━━━━\nHalo semuanya! Kami baru saja memperbarui database..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-blue-500 placeholder-slate-600"
+          />
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+          <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 select-none">
+            <input
+              type="checkbox"
+              checked={pinMessageInGroup}
+              onChange={(e) => setPinMessageInGroup(e.target.checked)}
+              className="rounded border-slate-700 text-blue-500 focus:ring-0"
+            />
+            <span>Sematkan / Pin Pesan ini di Grup (Jika Bot memiliki hak admin)</span>
+          </label>
+
+          <button
+            type="button"
+            onClick={handleExecuteBroadcast}
+            disabled={isBroadcasting || !broadcastText.trim()}
+            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 cursor-pointer disabled:opacity-50 active:scale-95 transition-all"
+          >
+            {isBroadcasting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Sedang Menyiarkan Broadcast...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                <span>Siarkan Broadcast Sekarang</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {broadcastResult && (
+          <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span className="text-slate-200">
+                Laporan Terakhir: <strong>{broadcastResult.success}</strong> berhasil dari <strong>{broadcastResult.total}</strong> target.
+              </span>
+            </div>
+            {broadcastResult.failed > 0 && (
+              <span className="text-rose-400 font-semibold">{broadcastResult.failed} gagal</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Settings Grid */}

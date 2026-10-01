@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Power, Activity, ShieldCheck, RefreshCw, ExternalLink, UploadCloud } from 'lucide-react';
+import { Bot, Power, Activity, ShieldCheck, RefreshCw, ExternalLink, UploadCloud, Lock, Unlock } from 'lucide-react';
 import { TelegramBotInfo } from '../types';
 
 interface BotNavbarProps {
@@ -12,6 +12,8 @@ interface BotNavbarProps {
   onToggleActive: (active: boolean) => void;
   isToggling: boolean;
   onOpenNetlifyModal?: () => void;
+  isOwnerUnlocked?: boolean;
+  onOpenOwnerModal?: () => void;
 }
 
 export function BotNavbar({
@@ -23,7 +25,9 @@ export function BotNavbar({
   isLoading,
   onToggleActive,
   isToggling,
-  onOpenNetlifyModal
+  onOpenNetlifyModal,
+  isOwnerUnlocked,
+  onOpenOwnerModal
 }: BotNavbarProps) {
   const formatUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -106,6 +110,22 @@ export function BotNavbar({
               <Activity className="w-3.5 h-3.5 text-emerald-400" />
               <span>Uptime: {formatUptime(uptimeSeconds)}</span>
             </div>
+          )}
+
+          {/* Owner Access Lock / Passkey Indicator */}
+          {onOpenOwnerModal && (
+            <button
+              onClick={onOpenOwnerModal}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer shadow-sm active:scale-95 ${
+                isOwnerUnlocked
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+              }`}
+              title={isOwnerUnlocked ? 'Mode Owner Aktif (Klik untuk kunci / atur kata kunci)' : 'Klik untuk membuka akses Owner dengan kata kunci'}
+            >
+              {isOwnerUnlocked ? <Unlock className="w-3.5 h-3.5 text-amber-400" /> : <Lock className="w-3.5 h-3.5 text-slate-400" />}
+              <span>{isOwnerUnlocked ? 'Owner: Unlocked' : 'Kunci Owner'}</span>
+            </button>
           )}
 
           {/* Connection Status Pill */}

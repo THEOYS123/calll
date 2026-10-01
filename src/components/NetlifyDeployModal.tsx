@@ -29,8 +29,22 @@ export function NetlifyDeployModal({ isOpen, onClose, onConnectCustomBackend }: 
   const [copiedStep, setCopiedStep] = useState<string | null>(null);
   const [backendUrlInput, setBackendUrlInput] = useState<string>(getCustomApiUrl());
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [downloadingZip, setDownloadingZip] = useState<'source' | 'dist' | null>(null);
 
   if (!isOpen) return null;
+
+  const handleDownloadZip = (type: 'source' | 'dist') => {
+    setDownloadingZip(type);
+    const link = document.createElement('a');
+    link.href = type === 'source' ? '/api/download/full-source-zip' : '/api/download/netlify-dist-zip';
+    link.setAttribute('download', type === 'source' ? 'axxosintbot-full-source.zip' : 'axxosintbot-netlify-dist.zip');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => {
+      setDownloadingZip(null);
+    }, 3500);
+  };
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -86,38 +100,45 @@ export function NetlifyDeployModal({ isOpen, onClose, onConnectCustomBackend }: 
                   <span>File Siap Deploy Netlify (.ZIP)</span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed mb-3">
-                  Berisi folder <code className="text-cyan-300 bg-cyan-950/80 px-1 py-0.5 rounded">dist/</code> hasil build dengan <code className="text-cyan-300 bg-cyan-950/80 px-1 py-0.5 rounded">_redirects</code> otomatis. Tinggal drag-and-drop ke Netlify Drop!
+                  Berisi folder <code className="text-cyan-300 bg-cyan-950/80 px-1 py-0.5 rounded">dist/</code> hasil build dengan file <code className="text-cyan-300 bg-cyan-950/80 px-1 py-0.5 rounded">_redirects</code> otomatis. Tinggal drag-and-drop ke Netlify Drop!
                 </p>
               </div>
-              <a
-                href="/downloads/axxosintbot-netlify-dist.zip"
-                download="axxosintbot-netlify-dist.zip"
-                className="w-full py-2.5 px-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition-all text-xs"
+              <button
+                type="button"
+                onClick={() => handleDownloadZip('dist')}
+                disabled={downloadingZip !== null}
+                className="w-full py-2.5 px-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition-all text-xs cursor-pointer disabled:opacity-75"
               >
-                <Download className="w-4 h-4" />
-                <span>Unduh Netlify Dist (.ZIP)</span>
-              </a>
+                <Download className={`w-4 h-4 ${downloadingZip === 'dist' ? 'animate-bounce' : ''}`} />
+                <span>{downloadingZip === 'dist' ? 'Sedang Mengunduh ZIP...' : 'Unduh Netlify Dist (.ZIP)'}</span>
+              </button>
             </div>
 
             {/* Box 2: Complete Source Code Zip */}
-            <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60 flex flex-col justify-between">
+            <div className="p-4 rounded-xl bg-slate-800/40 border border-emerald-500/30 flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-emerald-400 font-bold mb-1">
-                  <FileCode className="w-4 h-4" />
-                  <span>Full Source Code Proyek (.ZIP)</span>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                    <FileCode className="w-4 h-4" />
+                    <span>Full Source Code Proyek (.ZIP)</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 text-[10px] font-mono border border-emerald-500/30 font-bold">
+                    100% Utuh
+                  </span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed mb-3">
-                  Seluruh file sumber proyek lengkap (<code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">src/</code>, <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">server.ts</code>, <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">data/</code>, konfigurasi Netlify).
+                <p className="text-[11px] text-slate-300 leading-relaxed mb-3">
+                  Seluruh bagian website utuh sama persis (<code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">src/</code>, <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">server.ts</code>, <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">data/</code>, database, panduan VPS & Netlify).
                 </p>
               </div>
-              <a
-                href="/downloads/axxosintbot-source.zip"
-                download="axxosintbot-source.zip"
-                className="w-full py-2.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold rounded-lg flex items-center justify-center gap-2 border border-slate-600 transition-all text-xs"
+              <button
+                type="button"
+                onClick={() => handleDownloadZip('source')}
+                disabled={downloadingZip !== null}
+                className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 border border-emerald-400 transition-all text-xs cursor-pointer disabled:opacity-75"
               >
-                <Download className="w-4 h-4 text-emerald-400" />
-                <span>Unduh Full Source (.ZIP)</span>
-              </a>
+                <Download className={`w-4 h-4 ${downloadingZip === 'source' ? 'animate-bounce' : ''}`} />
+                <span>{downloadingZip === 'source' ? 'Sedang Mengunduh Full Source...' : 'Unduh Full Source (.ZIP)'}</span>
+              </button>
             </div>
           </div>
 

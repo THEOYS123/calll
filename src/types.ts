@@ -380,6 +380,110 @@ export interface ModerationConfig {
   recentIncidents?: ModerationIncident[];
 }
 
+export interface MessageLogEntry {
+  id: string;
+  timestamp: string;
+  formattedWib: string;
+  botId: string;
+  botUsername: string;
+  botName: string;
+  isPrimaryBot: boolean;
+  direction: 'incoming' | 'outgoing';
+  chatId: number | string;
+  chatType: 'private' | 'group' | 'supergroup' | 'channel';
+  chatTitle?: string;
+  userId?: number;
+  userName: string;
+  usernameTag?: string;
+  text: string;
+  command?: string;
+  status: 'delivered' | 'handled' | 'filtered' | 'failed';
+  filterReason?: string;
+  latencyMs?: number;
+}
+
+export interface QuotaPricePackage {
+  id: string;
+  name: string;
+  quotaAmount: number;
+  price: string;
+  description: string;
+  badge?: string;
+  isPopular?: boolean;
+}
+
+export const DEFAULT_QUOTA_PACKAGES: QuotaPricePackage[] = [
+  {
+    id: 'quota_basic',
+    name: 'Paket Hemat OSINT',
+    quotaAmount: 10,
+    price: 'Rp 15.000',
+    description: '10x Kuota Pencarian Intelijen NIK & Kependudukan',
+    badge: 'Pemula'
+  },
+  {
+    id: 'quota_pro',
+    name: 'Paket Pro Intelijen',
+    quotaAmount: 50,
+    price: 'Rp 50.000',
+    description: '50x Kuota Pencarian Deep OSINT & Trace Nomor Telepon',
+    badge: 'Paling Laris',
+    isPopular: true
+  },
+  {
+    id: 'quota_ultra',
+    name: 'Paket Ultra Unlimited',
+    quotaAmount: 200,
+    price: 'Rp 150.000',
+    description: '200x Kuota Pencarian Prioritas Tanpa Antrian Cooldown',
+    badge: 'Investigator'
+  }
+];
+
+export const DEFAULT_STRICT_BANNED_KEYWORDS: string[] = [
+  // 18+ / Pornografi / VCS / Prostitusi / Pelecehan
+  'bokep', 'b0kep', 'porn', 'porno', 'pornografi', '18+', 'vcs', 'open bo', 'bo cod',
+  'pap tt', 'pap bugil', 'pap toket', 'pap memek', 'pap nude', 'pap bug1l', 'desah',
+  'sange', 'sangean', 'bugil', 'toket', 'croot', 'crot', 'prostitusi', 'becek', 'mesum',
+  'seks', 'sex gratis', 'masturbasi', 'ngentot', 'memek', 'kontol', 'jav sub', 'onlyfans bocor',
+  'video mesum', 'doodstream', 'terabox bokep', 'vcs murah', 'pepek', 'ngocok', 'lonte',
+  'perek', 'tetek', 'colmek', 'colik', 'hentai', 'bokep viral', 'lendir', 'bacol', 'bahan coli',
+  'cewek sange', 'michat bo', 'bo include', 'cs mesum', 'videy', 'lulustream', 'gofile bokep',
+  'dildo', 'kondom', 'blowjob', 'ngocok kontol', 'hisap toket', 'remas toket', 'sex chat',
+  'pedofil', 'child porn', 'lolicon', 'shotacon', 'incest', 'ngaceng', 'cairan mani', 'sperma',
+  'psk', 'mucikari', 'germo', 'tante girang', 'pelacur', 'sundal', 'jablay', 'kimcil', 'cabe cabean',
+  'skandal selebgram', 'kebaya merah', 'chindo viral', 'video syur', 'doodla', 'doodli', 'terabox',
+
+  // Judi Online / Slot / Togel / Kasino
+  'slot', 'sl0t', 'judol', 'judi online', 'judi bola', 'gacor', 'scatter', 'maxwin',
+  'pragmatic', 'zeus slot', 'kakek zeus', 'olympus', 'sweet bonanza', 'mahjong ways',
+  'bandar togel', 'togel online', 'toto gelap', 'togel sgp', 'togel hk', 'toto macau',
+  'casino online', 'live casino', 'sbobet', 'agen judi', 'daftar slot', 'link slot',
+  'link gacor', 'situs slot', 'situs judi', 'depo pulsa', 'depo 10k', 'depo 25k', 'depo 50k',
+  'wd kilat', 'freebet', 'bocoran slot', 'pola gacor', 'jackpot slot', 'slot88', 'slot777',
+  'rtp slot', 'rtp live', 'rolet online', 'baccarat online', 'domino qiu', 'judi slot',
+  'agen slot', 'situs gacor', 'menang slot', 'gates of olympus', 'starlight princess',
+  'spxslot', 'mposlot', 'hoki slot', 'sensational slot', 'pola slot', 'cheat slot', 'scatter hitam',
+  'chip domino', 'chip higgs', 'anti rungkat', 'anti rungkad', 'garansi kekalahan', 'bonus new member',
+
+  // Narkoba / Obat Terlarang / Psikotropika
+  'narkoba', 'sabu', 'sabu-sabu', 'ekstasi', 'inex', 'inek', 'ganja', 'tembakau gorila',
+  'tembakau sintetis', 'sinte', 'pil koplo', 'tramadol', 'trihex', 'alprazolam', 'dumolid',
+  'kokain', 'heroin', 'psikotropika', 'jual sabu', 'beli ganja', 'bong sabu', 'shabu',
+  'obat keras daftar g', 'narkotika', 'methamphetamine', 'amfetamin', 'hexymer', 'riklona',
+  'calmlet', 'zypraz', 'putaw', 'bong kaca', 'pahe sabu',
+
+  // Penipuan / Phishing / Scam / Pinjol Ilegal
+  'pinjol ilegal', 'pengganda uang', 'pesugihan uang gaib', 'dana kaget palsu', 'jasa gestun ilegal',
+  'jasa hack saldo dana', 'apk pembobol rekening', 'saldo dana gratis tipu', 'jual beli rekening',
+  'rekening penampung', 'jual akun e-wallet bodong', 'arisan bodong', 'investasi bodong',
+  'kloning atm', 'joki pinjol', 'surat tilang apk', 'undangan pernikahan apk', 'jual uang palsu', 'upal',
+
+  // Senjata Ilegal & Peledak
+  'jual senpi', 'senjata api rakitan', 'jual celurit begal', 'bom ikan', 'bahan peledak rakitan',
+  'jual pistol rakitan', 'senjata tajam tawuran', 'celurit corbek'
+];
+
 export const DEFAULT_MODERATION_CONFIG: ModerationConfig = {
   enabled: true,
   deleteInGroups: true,
@@ -403,10 +507,89 @@ export const DEFAULT_MODERATION_CONFIG: ModerationConfig = {
     'sql injection', 'xss', 'rce', 'zeroday', '0day', 'forensic', 'darkweb'
   ],
 
-  customBannedKeywords: [],
+  customBannedKeywords: DEFAULT_STRICT_BANNED_KEYWORDS,
   whitelistKeywords: [],
   recentIncidents: []
 };
+
+export interface MultiBotInstance {
+  id: string; // e.g. "bot_1710000000_123"
+  token: string;
+  maskedToken: string;
+  isPrimary?: boolean;
+  isActive: boolean;
+  botInfo: TelegramBotInfo | null;
+  addedAt: string;
+  startedAt?: string | null;
+  lastPollingAt?: string;
+  lastError?: string | null;
+  latencyMs?: number;
+  stats?: {
+    messagesReceived: number;
+    messagesSent: number;
+    commandsExecuted: number;
+  };
+  notes?: string;
+  rentedBy?: string;
+  rentExpiryDate?: string;
+}
+
+export interface BotRentalPlan {
+  id: string;
+  name: string;
+  duration: string;
+  price: string;
+  description: string;
+  features: string[];
+  isPopular?: boolean;
+}
+
+export const DEFAULT_RENTAL_PLANS: BotRentalPlan[] = [
+  {
+    id: 'starter',
+    name: 'Paket Starter Dedicated',
+    duration: '30 Hari (1 Bulan)',
+    price: 'Rp 50.000',
+    description: 'Cocok untuk penggunaan pribadi atau grup komunitas kecil dengan bot branding sendiri.',
+    features: [
+      '1 Dedicated Bot Telegram (Username & Avatar milik Anda)',
+      'Akses Penuh Database Intelijen OSINT & NIK Nasional',
+      'Hosting Server 24/7 Uptime (Tanpa Perlu Sewa VPS)',
+      'Sistem Kuota Gratis & Manajemen Pengguna Otomatis',
+      'Fitur Anti-Spam & Moderasi Grup Bawaan'
+    ]
+  },
+  {
+    id: 'pro',
+    name: 'Paket Pro VIP Cluster',
+    duration: '90 Hari (3 Bulan)',
+    price: 'Rp 125.000',
+    description: 'Pilihan paling hemat & populer! Fitur terlengkap dengan performa pencarian prioritas.',
+    features: [
+      'Semua fitur Paket Starter',
+      'Kustomisasi Pesan Sambutan & Menu Interaktif Bebas',
+      'Jalur Proxy Pencarian Prioritas (Super Cepat)',
+      'Bebas pasang Watermark Brand Komunitas Anda',
+      'Koneksi Multi-Bot Cluster & Backup Server Otomatis',
+      'Admin Bot Mendapatkan Akses Unlimited'
+    ],
+    isPopular: true
+  },
+  {
+    id: 'lifetime',
+    name: 'Paket Lifetime / Permanen',
+    duration: 'Permanen (Sekali Bayar)',
+    price: 'Rp 250.000',
+    description: 'Investasi sekali bayar aktif selamanya tanpa biaya perpanjangan bulanan.',
+    features: [
+      'Semua fitur Paket Pro VIP',
+      'Aktivasi Bot Selamanya (Tanpa Biaya Bulanan)',
+      'Update Dataset Otomatis saat ada Kebocoran Data Baru',
+      'Dukungan Teknis & Maintenance Prioritas Langsung dari Ax.',
+      'API & Webhook Integrasi Bebas untuk Channel/Grup'
+    ]
+  }
+];
 
 export interface BotStatusState {
   isActive: boolean;
@@ -437,6 +620,11 @@ export interface BotStatusState {
   referralAccounts?: ReferralSavingsAccount[];
   referralRecords?: ReferralRecord[];
   referralWithdrawLogs?: ReferralWithdrawTransaction[];
+  multiBots?: MultiBotInstance[];
+  rentalPlans?: BotRentalPlan[];
+  quotaPackages?: QuotaPricePackage[];
+  messageLogs?: MessageLogEntry[];
+  ownerWebsitePasskey?: string;
 }
 
 // Legacy types for compatibility

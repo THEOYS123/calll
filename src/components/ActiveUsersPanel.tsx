@@ -1,21 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Users,
-  MessageSquare,
   Copy,
   Check,
   Send,
-  Clock,
   UserCheck,
   UserX,
   Search,
   ExternalLink,
   ShieldCheck,
   ShieldAlert,
-  Globe,
   Gift,
   Coins,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { BotUserEntry } from '../types';
 
@@ -34,7 +36,9 @@ export function ActiveUsersPanel({
 }: ActiveUsersPanelProps) {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [search, setSearch] = useState<string>('');
-  const [filterType, setFilterType] = useState<'all' | 'verified' | 'unverified'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'verified' | 'unverified' | 'has_savings' | 'has_quota'>('all');
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Gift Quota Modal State
   const [selectedUserForGift, setSelectedUserForGift] = useState<BotUserEntry | null>(null);
@@ -58,21 +62,41 @@ export function ActiveUsersPanel({
     return { flag: '🌐', label: langCode.toUpperCase() };
   };
 
-  const verifiedCount = users.filter((u) => u.isVerified).length;
-  const unverifiedCount = users.length - verifiedCount;
+  const totalUsersCount = users.length;
+  const verifiedCount = useMemo(() => users.filter((u) => u.isVerified).length, [users]);
+  const unverifiedCount = totalUsersCount - verifiedCount;
+  const totalActiveQuota = useMemo(() => users.reduce((acc, u) => acc + (u.personalQuota || 0), 0), [users]);
+  const totalSavingsQuota = useMemo(() => users.reduce((acc, u) => acc + (u.referralVaultBalance || 0), 0), [users]);
 
-  const filteredUsers = users.filter((u) => {
-    const term = search.toLowerCase();
-    const matchesSearch =
-      String(u.chatId).includes(term) ||
-      u.firstName.toLowerCase().includes(term) ||
-      (u.username && u.username.toLowerCase().includes(term));
+  const filteredUsers = useMemo(() => {
+    return users.filter((u) => {
+      const term = search.toLowerCase();
+      const matchesSearch =
+        String(u.chatId).includes(term) ||
+        (u.userId && String(u.userId).includes(term)) ||
+        u.firstName.toLowerCase().includes(term) ||
+        (u.lastName && u.lastName.toLowerCase().includes(term)) ||
+        (u.username && u.username.toLowerCase().includes(term));
 
-    if (!matchesSearch) return false;
-    if (filterType === 'verified') return u.isVerified;
-    if (filterType === 'unverified') return !u.isVerified;
-    return true;
-  });
+      if (!matchesSearch) return false;
+      if (filterType === 'verified') return u.isVerified;
+      if (filterType === 'unverified') return !u.isVerified;
+      if (filterType === 'has_savings') return (u.referralVaultBalance || 0) > 0;
+      if (filterType === 'has_quota') return (u.personalQuota || 0) > 0;
+      return true;
+    });
+  }, [users, search, filterType]);
+
+  // Pagination calculation
+  const totalFiltered = filteredUsers.length;
+  const totalPages = pageSize === 0 ? 1 : Math.ceil(totalFiltered / pageSize) || 1;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedUsers = useMemo(() => {
+    if (pageSize === 0) return filteredUsers;
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredUsers.slice(start, start + pageSize);
+  }, [filteredUsers, safeCurrentPage, pageSize]);
 
   const submitGiftQuota = async () => {
     if (!selectedUserForGift || !onGiftQuota) return;
@@ -86,81 +110,146 @@ export function ActiveUsersPanel({
   };
 
   return (
-    <div id="active-users-panel" className="bg-slate-900 border border-slate-800 rounded-2xl p-6 lg:p-8 shadow-xl relative">
-      {/* Header */}
+    <div id="active-users-panel" className="bg-slate-900 border border-slate-800 rounded-2xl p-6 lg:p-8 shadow-xl relative space-y-6">
+      {/* Top Metric Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 ring-1 ring-purple-500/30 flex items-center justify-center">
-            <Users className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 ring-1 ring-purple-500/30 flex items-center justify-center shadow-lg shadow-purple-950/30">
+            <Users className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-slate-100">
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-xl font-bold text-slate-100">
                 Pengguna & Manajemen Kuota
               </h3>
-              <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/30 text-xs rounded-full font-mono font-semibold">
-                {users.length} Kontak
+              <span className="px-2.5 py-0.5 bg-purple-500/10 text-purple-300 border border-purple-500/30 text-xs rounded-full font-mono font-bold">
+                Total {totalUsersCount} Akun Lengkap
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Daftar Chat ID pengguna terverifikasi, status anti-reset kuota, dan fitur hadiah kuota dari Web.
+            <p className="text-xs text-slate-400 mt-0.5">
+              Database seluruh pengguna Telegram terdaftar, status anti-exploit, saldo kuota aktif, dan tabungan referral.
             </p>
           </div>
         </div>
 
-        {/* Filter Pills & Search */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-            <button
-              onClick={() => setFilterType('all')}
-              className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                filterType === 'all'
-                  ? 'bg-slate-800 text-slate-100 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Semua ({users.length})
-            </button>
-            <button
-              onClick={() => setFilterType('verified')}
-              className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                filterType === 'verified'
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                  : 'text-slate-400 hover:text-emerald-300'
-              }`}
-            >
-              ✅ Terverifikasi ({verifiedCount})
-            </button>
-            <button
-              onClick={() => setFilterType('unverified')}
-              className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                filterType === 'unverified'
-                  ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                  : 'text-slate-400 hover:text-amber-300'
-              }`}
-            >
-              ⚠️ Belum ({unverifiedCount})
-            </button>
+        {/* Quick Stats Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-3 py-2">
+            <div className="text-[10px] uppercase font-mono text-slate-400">Terverifikasi</div>
+            <div className="text-sm font-bold text-emerald-400 font-mono">{verifiedCount} akun</div>
           </div>
-
-          {users.length > 0 && (
-            <div className="relative w-full sm:w-56">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari nama, ID, user..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-              />
-            </div>
-          )}
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-3 py-2">
+            <div className="text-[10px] uppercase font-mono text-slate-400">Belum /id</div>
+            <div className="text-sm font-bold text-amber-400 font-mono">{unverifiedCount} akun</div>
+          </div>
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-3 py-2">
+            <div className="text-[10px] uppercase font-mono text-slate-400">Total Kuota Aktif</div>
+            <div className="text-sm font-bold text-cyan-400 font-mono">{totalActiveQuota}x</div>
+          </div>
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-3 py-2">
+            <div className="text-[10px] uppercase font-mono text-slate-400">Total Tabungan</div>
+            <div className="text-sm font-bold text-purple-400 font-mono">{totalSavingsQuota}x</div>
+          </div>
         </div>
       </div>
 
-      {/* Users Table or Empty State */}
-      <div className="mt-6">
-        {users.length === 0 ? (
+      {/* Filter Pills, Search & Page Size */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <button
+            onClick={() => { setFilterType('all'); setCurrentPage(1); }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              filterType === 'all'
+                ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Semua ({totalUsersCount})
+          </button>
+          <button
+            onClick={() => { setFilterType('verified'); setCurrentPage(1); }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              filterType === 'verified'
+                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                : 'text-slate-400 hover:text-emerald-300'
+            }`}
+          >
+            ✅ Terverifikasi ({verifiedCount})
+          </button>
+          <button
+            onClick={() => { setFilterType('unverified'); setCurrentPage(1); }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              filterType === 'unverified'
+                ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                : 'text-slate-400 hover:text-amber-300'
+            }`}
+          >
+            ⚠️ Belum ({unverifiedCount})
+          </button>
+          <button
+            onClick={() => { setFilterType('has_savings'); setCurrentPage(1); }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              filterType === 'has_savings'
+                ? 'bg-purple-950 text-purple-300 border border-purple-800'
+                : 'text-slate-400 hover:text-purple-300'
+            }`}
+          >
+            💼 Punya Tabungan
+          </button>
+          <button
+            onClick={() => { setFilterType('has_quota'); setCurrentPage(1); }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              filterType === 'has_quota'
+                ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                : 'text-slate-400 hover:text-cyan-300'
+            }`}
+          >
+            💎 Punya Kuota
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Search Box */}
+          <div className="relative flex-1 sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+              placeholder="Cari nama, ID, username..."
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Rows Per Page Selector */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-700">
+            <span className="hidden sm:inline">Tampil:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+              className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer"
+            >
+              <option value={20} className="bg-slate-900">20</option>
+              <option value={25} className="bg-slate-900">25</option>
+              <option value={50} className="bg-slate-900">50</option>
+              <option value={100} className="bg-slate-900">100</option>
+              <option value={0} className="bg-slate-900">Semua ({totalUsersCount})</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Users Table */}
+      <div>
+        {totalUsersCount === 0 ? (
           <div className="py-12 px-4 text-center bg-slate-950/40 rounded-2xl border border-dashed border-slate-800">
             <div className="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <Users className="w-6 h-6" />
@@ -171,39 +260,55 @@ export function ActiveUsersPanel({
             </p>
           </div>
         ) : filteredUsers.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-400">
+          <div className="py-8 text-center text-xs text-slate-400 bg-slate-950/30 rounded-2xl border border-slate-800">
             Tidak ada pengguna yang cocok dengan filter atau pencarian &quot;{search}&quot;.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/40">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-slate-400 font-mono">
-                  <th className="pb-3 pr-4">PENGGUNA</th>
-                  <th className="pb-3 pr-4">CHAT ID</th>
-                  <th className="pb-3 pr-4">STATUS VERIFIKASI</th>
-                  <th className="pb-3 pr-4">KUOTA & JATAH KLAIM</th>
-                  <th className="pb-3 pr-4">LOKASI</th>
-                  <th className="pb-3 pr-4">PESAN</th>
-                  <th className="pb-3 pr-4">TERAKHIR AKTIF</th>
-                  <th className="pb-3 text-right">AKSI</th>
+                <tr className="border-b border-slate-800 text-slate-400 font-mono bg-slate-950/70">
+                  <th className="py-3 px-4">#</th>
+                  <th className="py-3 pr-4">PENGGUNA</th>
+                  <th className="py-3 pr-4">CHAT / USER ID</th>
+                  <th className="py-3 pr-4">STATUS VERIFIKASI</th>
+                  <th className="py-3 pr-4">KUOTA AKTIF & TABUNGAN</th>
+                  <th className="py-3 pr-4">JATAH KLAIM</th>
+                  <th className="py-3 pr-4">LOKASI</th>
+                  <th className="py-3 pr-4">PESAN</th>
+                  <th className="py-3 pr-4">TERAKHIR AKTIF</th>
+                  <th className="py-3 pr-4 text-right">AKSI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {filteredUsers.map((u) => {
+                {paginatedUsers.map((u, index) => {
+                  const globalIndex = pageSize === 0 ? index + 1 : (safeCurrentPage - 1) * pageSize + index + 1;
                   const country = getCountryBadge(u.languageCode);
                   const hasClaimedNew = Boolean(u.hasClaimedNewUserQuota);
                   const hasDailyClaim = Boolean(u.dailyQuotaLastClaimedDate);
+                  const savings = u.referralVaultBalance || 0;
+                  const personalQuota = u.personalQuota || 0;
 
                   return (
-                    <tr key={u.chatId} className="hover:bg-slate-800/40 transition-colors">
+                    <tr key={u.userId || u.chatId || index} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
+                        {globalIndex}
+                      </td>
+
                       <td className="py-3 pr-4">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-300">
                             {u.firstName ? u.firstName[0].toUpperCase() : 'U'}
                           </div>
                           <div>
-                            <div className="font-semibold text-slate-100">{u.firstName} {u.lastName}</div>
+                            <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                              <span>{u.firstName} {u.lastName}</span>
+                              {u.referredByUserId && (
+                                <span className="text-[9px] px-1.5 py-0.2 bg-purple-950/80 text-purple-300 border border-purple-800 rounded font-mono">
+                                  Ref
+                                </span>
+                              )}
+                            </div>
                             {u.username ? (
                               <a
                                 href={`https://t.me/${u.username}`}
@@ -215,7 +320,7 @@ export function ActiveUsersPanel({
                                 <ExternalLink className="w-2.5 h-2.5" />
                               </a>
                             ) : (
-                              <span className="text-[11px] text-slate-400">Tanpa username</span>
+                              <span className="text-[11px] text-slate-500 font-mono">Tanpa username</span>
                             )}
                           </div>
                         </div>
@@ -223,13 +328,13 @@ export function ActiveUsersPanel({
 
                       <td className="py-3 pr-4 font-mono font-medium text-amber-300">
                         <div className="flex items-center gap-1.5">
-                          <span>{u.chatId}</span>
+                          <span>{u.userId || u.chatId}</span>
                           <button
-                            onClick={() => handleCopy(u.chatId)}
+                            onClick={() => handleCopy(u.userId || u.chatId)}
                             className="text-slate-400 hover:text-slate-200 transition-colors p-1"
-                            title="Salin Chat ID"
+                            title="Salin User ID"
                           >
-                            {copiedId === u.chatId ? (
+                            {copiedId === (u.userId || u.chatId) ? (
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
@@ -253,33 +358,41 @@ export function ActiveUsersPanel({
                       </td>
 
                       <td className="py-3 pr-4">
-                        <div className="space-y-1">
+                        <div className="flex items-center gap-2">
                           <div className="inline-flex items-center gap-1 font-semibold text-xs text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/60 font-mono">
                             <Coins className="w-3 h-3 text-amber-400" />
-                            <span>{u.personalQuota || 0}x Kuota</span>
+                            <span>{personalQuota}x Kuota</span>
                           </div>
-                          <div className="flex items-center gap-1 text-[10px]">
-                            <span
-                              className={`px-1.5 py-0.2 rounded font-mono ${
-                                hasClaimedNew
-                                  ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-900/60'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                              title="Status klaim bonus pengguna baru (+5x)"
-                            >
-                              {hasClaimedNew ? 'Baru: Klaim ✓' : 'Baru: Belum'}
-                            </span>
-                            <span
-                              className={`px-1.5 py-0.2 rounded font-mono ${
-                                hasDailyClaim
-                                  ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-900/60'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                              title="Status klaim harian (+2x)"
-                            >
-                              {hasDailyClaim ? 'Harian: Klaim ✓' : 'Harian: Siap'}
-                            </span>
-                          </div>
+                          {savings > 0 && (
+                            <div className="inline-flex items-center gap-1 text-[11px] text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/60 font-mono">
+                              <span>💼 {savings}x Tabung</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-mono ${
+                              hasClaimedNew
+                                ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-900/60'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
+                            title="Status klaim bonus pengguna baru"
+                          >
+                            {hasClaimedNew ? 'Baru: Klaim ✓' : 'Baru: Belum'}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-mono ${
+                              hasDailyClaim
+                                ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-900/60'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
+                            title="Status klaim harian"
+                          >
+                            {hasDailyClaim ? 'Harian: Klaim ✓' : 'Harian: Siap'}
+                          </span>
                         </div>
                       </td>
 
@@ -298,8 +411,8 @@ export function ActiveUsersPanel({
                         {new Date(u.lastSeen).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
                       </td>
 
-                      <td className="py-3 text-right">
-                        <div className="inline-flex items-center gap-1.5">
+                      <td className="py-3 pr-4 text-right">
+                        <div className="inline-flex items-center gap-1.5 justify-end">
                           {onGiftQuota && (
                             <button
                               onClick={() => {
@@ -344,6 +457,39 @@ export function ActiveUsersPanel({
           </div>
         )}
       </div>
+
+      {/* Pagination Footer */}
+      {pageSize > 0 && totalFiltered > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 text-xs text-slate-400">
+          <div>
+            Menampilkan <span className="font-semibold text-slate-200">{Math.min(totalFiltered, (safeCurrentPage - 1) * pageSize + 1)}</span> - <span className="font-semibold text-slate-200">{Math.min(totalFiltered, safeCurrentPage * pageSize)}</span> dari <span className="font-semibold text-purple-400">{totalFiltered}</span> total pengguna terdaftar.
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safeCurrentPage <= 1}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 flex items-center gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Sebelumnya</span>
+            </button>
+
+            <span className="px-3 py-1 bg-slate-950 rounded-xl border border-slate-800 font-mono text-slate-300">
+              Hal {safeCurrentPage} / {totalPages}
+            </span>
+
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safeCurrentPage >= totalPages}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-700 flex items-center gap-1"
+            >
+              <span>Berikutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Gift Quota Modal */}
       {selectedUserForGift && (

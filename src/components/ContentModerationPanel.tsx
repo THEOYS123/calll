@@ -26,7 +26,7 @@ import {
   Eye,
   Info
 } from 'lucide-react';
-import { ModerationConfig, ModerationIncident, DEFAULT_MODERATION_CONFIG } from '../types';
+import { ModerationConfig, ModerationIncident, DEFAULT_MODERATION_CONFIG, DEFAULT_STRICT_BANNED_KEYWORDS } from '../types';
 
 interface ContentModerationPanelProps {
   moderationConfig?: ModerationConfig;
@@ -113,6 +113,24 @@ export function ContentModerationPanel({
       customBannedKeywords: (prev.customBannedKeywords || []).filter((k) => k !== kw)
     }));
     setIsDirty(true);
+  };
+
+  // Bulk Load 150+ Super Strict Predefined Banned Keywords
+  const handleLoadStrictKeywords = () => {
+    const existing = new Set(config.customBannedKeywords || []);
+    let addedCount = 0;
+    DEFAULT_STRICT_BANNED_KEYWORDS.forEach((kw) => {
+      if (!existing.has(kw)) {
+        existing.add(kw);
+        addedCount++;
+      }
+    });
+    setConfig((prev) => ({
+      ...prev,
+      customBannedKeywords: Array.from(existing)
+    }));
+    setIsDirty(true);
+    onShowToast(`🔥 Berhasil memuat ${addedCount} kata kunci terlarang super ketat! Total kata: ${existing.size}. Jangan lupa klik "Simpan Pengaturan".`, 'success');
   };
 
   // Add Cyber Whitelist Keyword
@@ -753,6 +771,21 @@ export function ContentModerationPanel({
             </div>
 
             <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2 p-2.5 bg-rose-950/30 border border-rose-900/40 rounded-xl">
+                <div>
+                  <span className="text-xs font-bold text-rose-300 block">Kamus Kata Terlarang Ketat</span>
+                  <span className="text-[10px] text-slate-400">Termasuk variasi leetspeak, 18+, slot, narkoba, penipuan</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLoadStrictKeywords}
+                  className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/30 cursor-pointer active:scale-95 transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>🔥 Muat 200+ Kata Ketat</span>
+                </button>
+              </div>
+
               <div className="flex items-center gap-2">
                 <input
                   type="text"
