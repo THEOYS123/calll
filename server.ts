@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import multer from 'multer';
 import * as archiverPkg from 'archiver';
 const archiver: any = (archiverPkg as any).default || archiverPkg;
@@ -38,7 +39,12 @@ import {
   MessageLogEntry,
   QuotaPricePackage,
   DEFAULT_QUOTA_PACKAGES,
-  DEFAULT_STRICT_BANNED_KEYWORDS
+  DEFAULT_STRICT_BANNED_KEYWORDS,
+  CloneOwnerRequest,
+  OwnerRole,
+  OwnerJwtPayload,
+  OwnerSessionRecord,
+  OwnerLoginResponse
 } from './src/types';
 import { extractLocationFromNik } from './src/utils/nikAnalyzer';
 import {
@@ -97,7 +103,7 @@ const datasetUpload = multer({
 const DEFAULT_OSINT_CONFIG: OsintConfig = {
   enabled: false, // Default is OFF: must be explicitly turned on by owner
   ngrokUrl: 'https://dd60-180-247-62-62.ngrok-free.app',
-  ownerUsername: '@flood1233',
+  ownerUsername: '',
   notifyOnStatusChange: true,
   searchEngineMode: 'smart_dataset', // Smart auto-search dataset.txt is primary!
   apiKeys: [
@@ -152,6 +158,8 @@ interface StoredBotConfig {
   rentalPlans?: BotRentalPlan[];
   quotaPackages?: QuotaPricePackage[];
   ownerWebsitePasskey?: string;
+  coOwners?: string[];
+  pendingCoOwners?: CloneOwnerRequest[];
   lastPollingOffset?: number;
 }
 
@@ -185,9 +193,9 @@ const DEFAULT_MODERATION_CONFIG: ModerationConfig = {
 
 const DEFAULT_QUOTA_CONFIG: QuotaConfig = {
   newUserQuotaEnabled: true, // Bonus kuota sambutan aktif
-  newUserQuotaAmount: 5, // Default +5x kuota pencarian gratis
+  newUserQuotaAmount: 1, // Default +1x kuota pencarian gratis (diperbarui)
   dailyQuotaEnabled: true, // Klaim kuota gratis harian aktif
-  dailyQuotaAmount: 2, // Default +2x kuota harian
+  dailyQuotaAmount: 1, // Default +1x kuota harian (diperbarui)
   dailyResetHourWib: 0, // Reset pukul 00:00 WIB
   deductQuotaOnlyOnFound: true, // Hanya kurangi kuota jika target ditemukan di dataset
   allowSearchWithoutApiKey: true, // Otomatis pakai kuota pribadi pengguna
@@ -276,7 +284,7 @@ const DEFAULT_AUTO_REPLIES: AutoReplyRule[] = [
     id: 'ar-3',
     triggerKeyword: 'siapa kamu',
     matchType: 'contains',
-    replyText: 'Saya adalah Bot Telegram cerdas yang selalu aktif 24/7 dan dikontrol melalui Website Controller.',
+    replyText: 'Saya adalah Bot Telegram cerdas yang selalu aktif 24/7 dan dikontrol melalui Website Controller karya Ax.',
     enabled: true
   },
   {
@@ -284,6 +292,188 @@ const DEFAULT_AUTO_REPLIES: AutoReplyRule[] = [
     triggerKeyword: 'p',
     matchType: 'exact',
     replyText: 'Ya, bot online dan siap merespon! Ketik /id untuk cek Chat ID dan verifikasi akun kamu.',
+    enabled: true
+  },
+  {
+    id: 'ar-5',
+    triggerKeyword: 'selamat pagi',
+    matchType: 'contains',
+    replyText: 'Selamat pagi! Semoga hari Anda menyenangkan dan produktif. Ada yang bisa bot bantu hari ini? Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-6',
+    triggerKeyword: 'pagi',
+    matchType: 'contains',
+    replyText: 'Pagi juga! Bot online 24 jam nonstop siap membantu pencarian intelijen Anda. Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-7',
+    triggerKeyword: 'selamat siang',
+    matchType: 'contains',
+    replyText: 'Selamat siang! Tetap semangat menjalani hari. Silakan ketik /menu untuk menggunakan fitur bot.',
+    enabled: true
+  },
+  {
+    id: 'ar-8',
+    triggerKeyword: 'siang',
+    matchType: 'contains',
+    replyText: 'Siang juga! Bot siap merespon. Butuh pencarian OSINT atau cek kuota? Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-9',
+    triggerKeyword: 'selamat sore',
+    matchType: 'contains',
+    replyText: 'Selamat sore! Selamat beristirahat atau melanjutkan aktivitas. Butuh bantuan bot? Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-10',
+    triggerKeyword: 'sore',
+    matchType: 'contains',
+    replyText: 'Sore juga! Bot standby 24/7. Ketik /menu untuk membuka menu interaktif.',
+    enabled: true
+  },
+  {
+    id: 'ar-11',
+    triggerKeyword: 'selamat malam',
+    matchType: 'contains',
+    replyText: 'Selamat malam! Bot intelijen tetap aktif 24 jam melayani Anda. Silakan ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-12',
+    triggerKeyword: 'malam',
+    matchType: 'contains',
+    replyText: 'Malam juga! Jangan lupa jaga kesehatan. Butuh pencarian intelijen atau cek ID? Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-13',
+    triggerKeyword: 'hai',
+    matchType: 'contains',
+    replyText: 'Hai! Senang menyapa Anda. Silakan ketik /menu untuk mulai menggunakan fitur bot.',
+    enabled: true
+  },
+  {
+    id: 'ar-14',
+    triggerKeyword: 'hello',
+    matchType: 'contains',
+    replyText: 'Hello! Selamat datang di axxosintbot. Ketik /menu atau /id untuk verifikasi akun Anda.',
+    enabled: true
+  },
+  {
+    id: 'ar-15',
+    triggerKeyword: 'hei',
+    matchType: 'contains',
+    replyText: 'Hei juga! Bot siap membantu 24/7. Ketik /menu untuk melihat daftar fitur.',
+    enabled: true
+  },
+  {
+    id: 'ar-16',
+    triggerKeyword: 'samlikum',
+    matchType: 'contains',
+    replyText: 'Waalaikumsalam warahmatullahi wabarakatuh! Ada yang bisa kami bantu? Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-17',
+    triggerKeyword: 'salam',
+    matchType: 'contains',
+    replyText: 'Salam hangat! Selamat datang di bot intelijen & profiling OSINT. Ketik /menu untuk bantuan.',
+    enabled: true
+  },
+  {
+    id: 'ar-18',
+    triggerKeyword: 'permisi',
+    matchType: 'contains',
+    replyText: 'Iya, permisi! Silakan masuk dan gunakan bot dengan bijak. Ketik /menu untuk daftar perintah.',
+    enabled: true
+  },
+  {
+    id: 'ar-19',
+    triggerKeyword: 'punten',
+    matchType: 'contains',
+    replyText: 'Mangga! Aya naon lur? Bot siap ngabantosan 24 jam. Ketik /menu kanggo ningali fitur.',
+    enabled: true
+  },
+  {
+    id: 'ar-20',
+    triggerKeyword: 'sampurasun',
+    matchType: 'contains',
+    replyText: 'Rampes! Wilujeng sumping di axxosintbot. Ketik /menu kanggo milih layanan.',
+    enabled: true
+  },
+  {
+    id: 'ar-21',
+    triggerKeyword: 'kulonuwun',
+    matchType: 'contains',
+    replyText: 'Monggo! Sugeng rawuh, wonten ingkang saged dipunbantu? Mangga ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-22',
+    triggerKeyword: 'ping',
+    matchType: 'exact',
+    replyText: 'Pong! 🏓 Latency server sangat cepat dan bot online 24/7. Ketik /ping untuk detail latency.',
+    enabled: true
+  },
+  {
+    id: 'ar-23',
+    triggerKeyword: 'tes',
+    matchType: 'contains',
+    replyText: 'Tes berhasil! Bot aktif 100% dan terhubung ke server intelijen. Ketik /menu untuk mencoba fitur.',
+    enabled: true
+  },
+  {
+    id: 'ar-24',
+    triggerKeyword: 'test',
+    matchType: 'contains',
+    replyText: 'Test OK! Sistem berjalan lancar dan siap memproses perintah Anda. Ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-25',
+    triggerKeyword: 'terima kasih',
+    matchType: 'contains',
+    replyText: 'Sama-sama! Senang bisa membantu Anda. Jika butuh bantuan lain, silakan ketik /menu.',
+    enabled: true
+  },
+  {
+    id: 'ar-26',
+    triggerKeyword: 'makasih',
+    matchType: 'contains',
+    replyText: 'Sama-sama kak! Jangan ragu gunakan fitur bot kami kapan saja.',
+    enabled: true
+  },
+  {
+    id: 'ar-27',
+    triggerKeyword: 'thanks',
+    matchType: 'contains',
+    replyText: 'You are welcome! Happy to assist you. Type /menu to explore more features.',
+    enabled: true
+  },
+  {
+    id: 'ar-28',
+    triggerKeyword: 'sewa bot',
+    matchType: 'contains',
+    replyText: 'Tertarik sewa bot dedicated untuk grup atau komunitas Anda? Hubungi Owner resmi: @flood1233.',
+    enabled: true
+  },
+  {
+    id: 'ar-29',
+    triggerKeyword: 'bro',
+    matchType: 'exact',
+    replyText: 'Yo bro! Ada yang bisa dibantu? Ketik /menu buat lihat fitur-fitur bot.',
+    enabled: true
+  },
+  {
+    id: 'ar-30',
+    triggerKeyword: 'min',
+    matchType: 'exact',
+    replyText: 'Halo gan! Admin/Bot siap membantu. Silakan ketik /menu ya.',
     enabled: true
   }
 ];
@@ -714,6 +904,193 @@ async function isTelegramGroupAdmin(token: string, chatId: number | string, user
   }
 }
 
+// =========================================================================
+// STRICT BOT OWNER SECURITY AUTHORIZATION SYSTEM
+// Verifies whether a Telegram user is authorized as Primary Owner,
+// approved Secondary/Clone Owner, or Master Owner for a specific bot.
+// =========================================================================
+export interface OwnerAuthResult {
+  authorized: boolean;
+  role: 'primary_owner' | 'clone_owner' | 'master_owner' | 'none';
+  ownerDisplay: string;
+  isClonePending?: boolean;
+}
+
+export function isUserAuthorizedOwner(
+  from: { id: number | string; username?: string },
+  sourceBot?: MultiBotInstance | null
+): OwnerAuthResult {
+  const numericId = Number(from.id);
+  const usernameClean = (from.username || '').toLowerCase().replace(/^@/, '').trim();
+
+  // 1. Check Global / Master Bot Owner
+  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || '').toLowerCase().replace(/^@/, '').trim();
+  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : null;
+  const masterCoOwners = (botConfig.coOwners || []).map((o) => o.toLowerCase().replace(/^@/, '').trim());
+
+  const isMasterOwner =
+    (masterOwnerChatId !== null && masterOwnerChatId > 0 && numericId === masterOwnerChatId) ||
+    (masterOwnerUsername.length > 0 && usernameClean.length > 0 && usernameClean === masterOwnerUsername) ||
+    (masterOwnerUsername.length > 0 && !isNaN(Number(masterOwnerUsername)) && numericId === Number(masterOwnerUsername)) ||
+    (usernameClean.length > 0 && masterCoOwners.includes(usernameClean)) ||
+    (numericId > 0 && masterCoOwners.includes(String(numericId)));
+
+  // If no sourceBot, this is the Master Bot
+  if (!sourceBot) {
+    if (isMasterOwner) {
+      if (usernameClean === masterOwnerUsername && !botConfig.osintConfig.ownerChatId && numericId > 0) {
+        botConfig.osintConfig.ownerChatId = numericId;
+        saveBotConfig();
+      }
+      return {
+        authorized: true,
+        role: 'master_owner',
+        ownerDisplay: masterOwnerUsername ? `@${masterOwnerUsername}` : String(masterOwnerChatId || numericId)
+      };
+    }
+    return {
+      authorized: false,
+      role: 'none',
+      ownerDisplay: masterOwnerUsername ? `@${masterOwnerUsername}` : 'Owner Master'
+    };
+  }
+
+  // 2. Check Specific Secondary / Cloned Cluster Bot (Sewa Bot)
+  const botPrimaryOwnerRaw = (sourceBot.primaryOwner || '').trim();
+  const botPrimaryOwnerClean = botPrimaryOwnerRaw.toLowerCase().replace(/^@/, '').trim();
+  const botPrimaryChatId = sourceBot.primaryOwnerChatId ? Number(sourceBot.primaryOwnerChatId) : null;
+  const botSecondaryOwners = (sourceBot.secondaryOwners || []).map((o) => o.toLowerCase().replace(/^@/, '').trim());
+
+  // Check if primary owner of this rented bot
+  const isPrimary =
+    (botPrimaryChatId !== null && botPrimaryChatId > 0 && numericId === botPrimaryChatId) ||
+    (botPrimaryOwnerClean.length > 0 && !isNaN(Number(botPrimaryOwnerClean)) && numericId === Number(botPrimaryOwnerClean)) ||
+    (botPrimaryOwnerClean.length > 0 && usernameClean.length > 0 && usernameClean === botPrimaryOwnerClean);
+
+  if (isPrimary) {
+    if (!sourceBot.primaryOwnerChatId && numericId > 0) {
+      sourceBot.primaryOwnerChatId = numericId;
+      saveBotConfig();
+    }
+    return {
+      authorized: true,
+      role: 'primary_owner',
+      ownerDisplay: botPrimaryOwnerRaw.startsWith('@') ? botPrimaryOwnerRaw : `@${botPrimaryOwnerRaw}`
+    };
+  }
+
+  // Check if approved clone / secondary owner of this rented bot
+  const isApprovedClone =
+    (usernameClean.length > 0 && botSecondaryOwners.includes(usernameClean)) ||
+    (numericId > 0 && botSecondaryOwners.includes(String(numericId)));
+
+  if (isApprovedClone) {
+    return {
+      authorized: true,
+      role: 'clone_owner',
+      ownerDisplay: botPrimaryOwnerRaw.startsWith('@') ? botPrimaryOwnerRaw : `@${botPrimaryOwnerRaw}`
+    };
+  }
+
+  // Check if this user has a pending clone request
+  const isPending = (sourceBot.pendingCloneOwners || []).some(
+    (p) => p.status === 'pending' && (
+      (usernameClean.length > 0 && p.ownerIdentifier.toLowerCase().replace(/^@/, '').trim() === usernameClean) ||
+      p.ownerIdentifier.trim() === String(numericId)
+    )
+  );
+
+  // Any other user (including strangers or unlinked accounts) is strictly unauthorized on this rented bot!
+  return {
+    authorized: false,
+    role: 'none',
+    ownerDisplay: botPrimaryOwnerRaw ? (botPrimaryOwnerRaw.startsWith('@') ? botPrimaryOwnerRaw : `@${botPrimaryOwnerRaw}`) : 'Owner Bot',
+    isClonePending: isPending
+  };
+}
+
+// Multi-Layer API Authorization Check for Express HTTP Endpoints
+export function checkCallerIsAuthorizedOwner(req: any): { authorized: boolean; reason?: string; role?: string; details?: any } {
+  // 1. Check Master Website Passkey (Header, Body, Query)
+  const passkey = req.headers['x-owner-passkey'] || req.headers['x-passkey'] || req.body?.passkey || req.query?.passkey;
+  const expectedPasskey = (botConfig.ownerWebsitePasskey || 'ax0895').trim().toLowerCase();
+  if (passkey && String(passkey).trim().toLowerCase() === expectedPasskey) {
+    return { authorized: true, role: 'master_passkey' };
+  }
+
+  // 2. Direct browser frontend request from web dashboard
+  if (
+    req.headers['x-web-client'] ||
+    req.headers['x-requested-with'] ||
+    req.headers['sec-fetch-mode'] ||
+    req.headers['authorization']
+  ) {
+    return { authorized: true, role: 'web_session' };
+  }
+
+  // 3. Check Telegram Chat ID / Username (Headers, Body, Query)
+  const rawChatId = req.headers['x-owner-chat-id'] || req.headers['x-chat-id'] || req.headers['x-telegram-id'] || req.body?.chatId || req.body?.chat_id || req.body?.userId || req.body?.user_id || req.query?.chatId || req.query?.chat_id;
+  const rawUsername = req.headers['x-owner-username'] || req.headers['x-username'] || req.body?.username || req.query?.username;
+
+  if (!rawChatId && !rawUsername) {
+    return { authorized: true, role: 'web_session' };
+  }
+
+  const numChatId = Number(rawChatId);
+  const cleanUn = rawUsername ? String(rawUsername).toLowerCase().replace(/^@/, '').trim() : '';
+
+  // Check Master Owner & Co-Owners
+  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || '').toLowerCase().replace(/^@/, '').trim();
+  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : null;
+  const masterCoOwners = (botConfig.coOwners || []).map((o) => o.toLowerCase().replace(/^@/, '').trim());
+
+  if (
+    (masterOwnerChatId !== null && masterOwnerChatId > 0 && numChatId === masterOwnerChatId) ||
+    (masterOwnerUsername.length > 0 && cleanUn.length > 0 && cleanUn === masterOwnerUsername) ||
+    (masterOwnerUsername.length > 0 && !isNaN(Number(masterOwnerUsername)) && numChatId === Number(masterOwnerUsername)) ||
+    (cleanUn.length > 0 && masterCoOwners.includes(cleanUn)) ||
+    (numChatId > 0 && masterCoOwners.includes(String(numChatId)))
+  ) {
+    return { authorized: true, role: 'master_owner' };
+  }
+
+  // Check Secondary / Rented Bot Owners & Approved Clone Owners
+  for (const bot of botConfig.multiBots || []) {
+    const po = (bot.primaryOwner || '').toLowerCase().replace(/^@/, '').trim();
+    const poChatId = bot.primaryOwnerChatId ? Number(bot.primaryOwnerChatId) : null;
+    const clones = (bot.secondaryOwners || []).map((c) => c.toLowerCase().replace(/^@/, '').trim());
+
+    if (
+      (poChatId !== null && poChatId > 0 && numChatId === poChatId) ||
+      (po.length > 0 && cleanUn.length > 0 && cleanUn === po) ||
+      (po.length > 0 && !isNaN(Number(po)) && numChatId === Number(po)) ||
+      (cleanUn.length > 0 && clones.includes(cleanUn)) ||
+      (numChatId > 0 && clones.includes(String(numChatId)))
+    ) {
+      return { authorized: true, role: 'bot_owner', details: { botId: bot.id, botUsername: bot.botInfo?.username } };
+    }
+  }
+
+  return {
+    authorized: false,
+    reason: `Chat ID (${rawChatId || '-'}) atau username (@${cleanUn || '-'}) tidak terdaftar dalam daftar Owner Utama maupun Owner Clone resmi.`
+  };
+}
+
+export function requireOwnerAuthMiddleware(req: any, res: any, next: any) {
+  const auth = checkCallerIsAuthorizedOwner(req);
+  if (!auth.authorized) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Akses Ditolak.',
+      message: auth.reason || 'Chat ID Telegram Anda tidak terdaftar sebagai Owner Utama maupun Owner Clone resmi.',
+      authorized: false
+    });
+  }
+  (req as any).ownerAuth = auth;
+  next();
+}
+
 // Synchronize user personal API key in osintConfig.apiKeys
 function syncUserApiKey(user: BotUserEntry) {
   const numericId = Number(user.userId || user.chatId);
@@ -795,6 +1172,19 @@ function loadBotConfig() {
           ...parsed.menuConfig,
           customButtons: Array.isArray(parsed.menuConfig.customButtons) ? parsed.menuConfig.customButtons : []
         } : DEFAULT_MENU_CONFIG,
+        coOwners: Array.isArray(parsed.coOwners) ? parsed.coOwners : [],
+        pendingCoOwners: Array.isArray(parsed.pendingCoOwners) ? parsed.pendingCoOwners : [],
+        multiBots: Array.isArray(parsed.multiBots) ? parsed.multiBots.map((b: any) => ({
+          ...b,
+          primaryOwner: b.primaryOwner || parsed.osintConfig?.ownerUsername || DEFAULT_OSINT_CONFIG.ownerUsername || '@flood1233',
+          primaryOwnerChatId: b.primaryOwnerChatId || null,
+          secondaryOwners: Array.isArray(b.secondaryOwners) ? b.secondaryOwners : [],
+          pendingCloneOwners: Array.isArray(b.pendingCloneOwners) ? b.pendingCloneOwners : [],
+          secretCode: b.secretCode || parsed.ownerWebsitePasskey || 'ax0895'
+        })) : [],
+        rentalPlans: Array.isArray(parsed.rentalPlans) ? parsed.rentalPlans : DEFAULT_RENTAL_PLANS,
+        quotaPackages: Array.isArray(parsed.quotaPackages) ? parsed.quotaPackages : DEFAULT_QUOTA_PACKAGES,
+        ownerWebsitePasskey: parsed.ownerWebsitePasskey || 'ax0895',
         lastPollingOffset: typeof parsed.lastPollingOffset === 'number' ? parsed.lastPollingOffset : 0
       };
 
@@ -1292,6 +1682,67 @@ async function sendTelegramMessage(
   return null;
 }
 
+// Send Push Notification to Primary Owner for Clone Owner Confirmation
+async function notifyPrimaryOwnerForCloneApproval(botItem: MultiBotInstance, cloneRequest: CloneOwnerRequest): Promise<boolean> {
+  const token = botItem.token || botConfig.token;
+  const primaryChatId = botItem.primaryOwnerChatId;
+  const botUsername = botItem.botInfo?.username || botItem.id;
+  const wibTime = getFormattedWIB();
+
+  const msgText = `🔔 *PERMINTAAN KONFIRMASI OWNER CLONE BARU*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Bot:* @${botUsername}
+👤 *Calon Owner Clone:* \`${cloneRequest.ownerIdentifier}\`
+🕒 *Waktu Pengajuan:* ${wibTime.fullStr}
+
+Apakah Anda memperbolehkan akun di atas menjadi *Owner Clone / Co-Owner* resmi untuk bot ini?
+Jika disetujui, akun tersebut akan memiliki akses ke menu rahasia dan kontrol operasional bot.
+━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+  const inlineKeyboard = [
+    [
+      { text: '✅ Perbolehkan (Setujui)', callback_data: `approve_clone_${botItem.id}_${cloneRequest.id}` },
+      { text: '❌ Tolak (Jangan Izinkan)', callback_data: `reject_clone_${botItem.id}_${cloneRequest.id}` }
+    ]
+  ];
+
+  // 1. Try sending to bot's primaryOwnerChatId if known
+  if (primaryChatId) {
+    try {
+      const sent = await sendTelegramMessage(primaryChatId, msgText, { inline_keyboard: inlineKeyboard }, 'Markdown', token);
+      if (sent) return true;
+    } catch (e: any) {
+      console.warn(`[Clone Approval] Failed to send via secondary bot to ${primaryChatId}:`, e.message);
+    }
+  }
+
+  // 2. If primaryChatId not set yet, try resolving from activeUsers by username
+  const targetUser = botConfig.activeUsers.find((u) => {
+    const un = (u.username || '').toLowerCase().replace(/^@/, '');
+    const targetUn = (botItem.primaryOwner || '').toLowerCase().replace(/^@/, '');
+    return un && targetUn && un === targetUn;
+  });
+
+  if (targetUser && targetUser.chatId) {
+    botItem.primaryOwnerChatId = Number(targetUser.chatId);
+    saveBotConfig();
+    try {
+      const sent = await sendTelegramMessage(targetUser.chatId, msgText, { inline_keyboard: inlineKeyboard }, 'Markdown', token);
+      if (sent) return true;
+    } catch {}
+  }
+
+  // 3. Fallback to Master Bot Owner Chat ID if configured
+  if (botConfig.osintConfig?.ownerChatId && botConfig.token) {
+    try {
+      const sent = await sendTelegramMessage(botConfig.osintConfig.ownerChatId, msgText, { inline_keyboard: inlineKeyboard }, 'Markdown', botConfig.token);
+      if (sent) return true;
+    } catch {}
+  }
+
+  return false;
+}
+
 // Send Telegram Document / File Helper (Native multipart form upload with resilient caption handling)
 async function sendTelegramDocument(
   chatId: string | number,
@@ -1672,9 +2123,179 @@ ${listFormatted}
   await sendTelegramMessage(chatId, historyCard, { inline_keyboard: keyboard });
 }
 
+// Track unauthorized attempts on owner secret codes (Stealth mode on attempts 1 & 2, blocked card on attempt 3+)
+const unauthorizedOwnerAttempts = new Map<string, { count: number; lastAttempt: number }>();
+
+function getEffectiveBotOwner(sourceBot?: MultiBotInstance | null): {
+  username: string;
+  cleanUsername: string;
+  url: string;
+  display: string;
+} {
+  let ownerRaw = '';
+  if (sourceBot) {
+    ownerRaw = sourceBot.primaryOwner || sourceBot.rentedBy || botConfig.osintConfig?.ownerUsername || '@puttsyournamee';
+  } else {
+    ownerRaw = botConfig.osintConfig?.ownerUsername || '@flood1233';
+  }
+  const cleanUsername = ownerRaw.toLowerCase().replace(/^@/, '').trim() || 'flood1233';
+  const username = `@${cleanUsername}`;
+  const url = `https://t.me/${cleanUsername}`;
+  const display = username;
+  return { username, cleanUsername, url, display };
+}
+
+function getEffectiveBotInfo(sourceBot?: MultiBotInstance | null): {
+  name: string;
+  username: string;
+  id: string | number;
+  canJoinGroups: boolean;
+  canReadAll: boolean;
+  isSecondary: boolean;
+  uptimeSec: number;
+  roleTitle: string;
+} {
+  if (sourceBot) {
+    const started = sourceBot.startedAt ? new Date(sourceBot.startedAt).getTime() : (botStartedAt || Date.now());
+    const uptimeSec = Math.floor((Date.now() - started) / 1000);
+    return {
+      name: sourceBot.botInfo?.first_name || 'ax test bot',
+      username: sourceBot.botInfo?.username ? `@${sourceBot.botInfo.username}` : '@axtesttbot',
+      id: sourceBot.botInfo?.id || sourceBot.id,
+      canJoinGroups: Boolean(sourceBot.botInfo?.can_join_groups),
+      canReadAll: Boolean(sourceBot.botInfo?.can_read_all_group_messages),
+      isSecondary: true,
+      uptimeSec: Math.max(0, uptimeSec),
+      roleTitle: 'SECONDARY WORKER BOTS (Bot Sewa Dedicated)'
+    };
+  }
+
+  const uptimeSec = botStartedAt ? Math.floor((Date.now() - botStartedAt) / 1000) : 0;
+  return {
+    name: currentBotInfo?.first_name || 'renfollbot',
+    username: currentBotInfo?.username ? `@${currentBotInfo.username}` : '@rx_follbot',
+    id: currentBotInfo?.id || 'N/A',
+    canJoinGroups: Boolean(currentBotInfo?.can_join_groups),
+    canReadAll: Boolean(currentBotInfo?.can_read_all_group_messages),
+    isSecondary: false,
+    uptimeSec: Math.max(0, uptimeSec),
+    roleTitle: 'MASTER BOT (Master Controller Node)'
+  };
+}
+
+function formatBotWelcomeMessage(
+  sourceBot?: MultiBotInstance | null,
+  currentUser?: BotUserEntry,
+  senderName: string = 'Pengguna',
+  chatId: number | string = 0,
+  referredInviterName?: string
+): string {
+  const bInfo = getEffectiveBotInfo(sourceBot);
+  const owner = getEffectiveBotOwner(sourceBot);
+
+  const todayWib = getWibDateString();
+  const isDailyClaimed = currentUser ? currentUser.dailyQuotaLastClaimedDate === todayWib : false;
+  const isNewClaimed = currentUser ? Boolean(currentUser.hasClaimedNewUserQuota) : false;
+  const quotaBalance = currentUser ? (currentUser.personalQuota || 0) : 0;
+  const savingsBalance = currentUser ? (currentUser.referralVaultBalance || 0) : 0;
+
+  const referrerNotice = referredInviterName
+    ? `\n✨ *Anda bergabung melalui undangan resmi dari:* *${referredInviterName}* (Pendaftaran Resmi Terkonfirmasi!)\n`
+    : '';
+
+  let headerIntro = '';
+  if (sourceBot) {
+    headerIntro = `👋 *Halo! Selamat datang di ${bInfo.name} Intelligence & Automation.*
+
+Saya adalah *${bInfo.name}* (${bInfo.username}), bot intelijen OSINT & profiling otomatis${sourceBot.primaryOwner ? ` yang dikelola oleh *${owner.username}*` : ''}.
+
+Silakan gunakan tombol menu interaktif di bawah atau ketik perintah:
+• /id - Cek Chat ID & profil kamu
+• /bot - Detail & spesifikasi bot
+• /ping - Cek kecepatan respon & status server
+• /waktu - Cek jam WIB real-time
+• /help - Bantuan & daftar perintah lengkap`;
+  } else {
+    headerIntro = botConfig.welcomeMessage || DEFAULT_WELCOME_MESSAGE;
+  }
+
+  return `${headerIntro}${referrerNotice}
+
+👤 *Pengguna:* ${senderName}
+🆔 *Chat ID:* \`${chatId}\` ✅ _(Terdaftar Resmi)_
+💎 *Sisa Kuota Aktif:* *${quotaBalance}x Pencarian*
+💼 *Saldo Tabungan Kuota:* *${savingsBalance}x Kuota* ${savingsBalance > 0 ? '_(Siap Ditarik)_' : ''}
+🎁 *Status Klaim:* ${!isNewClaimed ? `🎁 *Bonus Baru Tersedia (+${botConfig.quotaConfig?.newUserQuotaAmount || 1}x)*` : !isDailyClaimed ? `✨ *Kuota Harian Tersedia (+${botConfig.quotaConfig?.dailyQuotaAmount || 1}x)*` : '✅ Kuota Harian Sudah Diambil'}`;
+}
+
+function formatBotDetailCard(sourceBot?: MultiBotInstance | null): string {
+  const bInfo = getEffectiveBotInfo(sourceBot);
+  const owner = getEffectiveBotOwner(sourceBot);
+
+  if (sourceBot) {
+    const expStatus = getRentExpiryStatus(sourceBot.rentExpiryDate);
+    const msgsRecv = sourceBot.stats?.messagesReceived || 0;
+    const msgsSent = sourceBot.stats?.messagesSent || 0;
+    const cmdsExec = sourceBot.stats?.commandsExecuted || 0;
+
+    return `🤖 *DETAIL & SPESIFIKASI RESMI ${bInfo.name.toUpperCase()}*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+📛 *Nama Bot:* ${bInfo.name}
+🏷 *Username:* ${bInfo.username}
+👑 *Owner Utama:* ${owner.username}
+👤 *Penyewa:* ${sourceBot.rentedBy || owner.username}
+🔢 *Bot ID:* \`${bInfo.id}\`
+🟢 *Status:* ${sourceBot.isActive ? 'AKTIF & STANDBY (Always-ON)' : '🔴 NONAKTIF (PAUSED)'}
+📅 *Masa Sewa:* ${sourceBot.rentExpiryDate ? `${sourceBot.rentExpiryDate} WIB (${expStatus.remainingText})` : '♾️ Permanen'}
+⏱ *Durasi Uptime:* ${formatUptime(bInfo.uptimeSec)}
+🔍 *Status OSINT:* ${botConfig.osintConfig?.enabled ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)'}
+👥 *Izin Grup:* ${bInfo.canJoinGroups ? 'Diizinkan' : 'Dibatasi'}
+📖 *Mode Baca Pesan:* ${bInfo.canReadAll ? 'Aktif' : 'Default'}
+⚡ *Engine:* axxosintbot Secondary Worker Engine v3.0
+📊 *Total Pesan Masuk:* ${msgsRecv}
+📤 *Total Pesan Terkirim:* ${msgsSent}
+⚡ *Total Perintah Dijalankan:* ${cmdsExec}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 _Bot ini adalah Dedicated Worker yang terhubung ke Cluster Cloud OSINT & Keamanan Otomatis._`;
+  }
+
+  return `🤖 *DETAIL & SPESIFIKASI RESMI ${bInfo.name.toUpperCase()}*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+📛 *Nama Bot:* ${bInfo.name}
+🏷 *Username:* ${bInfo.username}
+👑 *Developer / Creator:* Ax. (${owner.username})
+🔢 *Bot ID:* \`${bInfo.id}\`
+🟢 *Status Server:* AKTIF (Always-ON Service)
+⏱ *Durasi Uptime:* ${formatUptime(bInfo.uptimeSec)}
+🔍 *Status OSINT:* ${botConfig.osintConfig?.enabled ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)'}
+👥 *Izin Masuk Grup:* ${bInfo.canJoinGroups ? '✅ Ya' : '❌ Tidak'}
+⚡ *Engine:* axxosintbot Master Core Engine v3.0 (Created by Ax.)
+📊 *Total Pesan Masuk:* ${botConfig.stats.messagesReceived}
+📤 *Total Pesan Terkirim:* ${botConfig.stats.messagesSent}
+🔍 *Total Pencarian OSINT:* ${botConfig.stats.osintSearchesCount || 0}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 _Master Bot Controller dikelola langsung melalui Web Controller Dashboard._`;
+}
+
+function formatBotPingCard(sourceBot?: MultiBotInstance | null, timeStr: string = ''): string {
+  const bInfo = getEffectiveBotInfo(sourceBot);
+  const latency = sourceBot ? (sourceBot.latencyMs || 30) : 30;
+
+  return `🏓 *PONG! BOT ONLINE & RESPONSIF*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Bot:* ${bInfo.name} (${bInfo.username})
+⚡ *Kecepatan:* Normal (~${latency}ms)
+🟢 *Mode:* Always ON (Aktif 24/7)
+⏱ *Uptime:* ${formatUptime(bInfo.uptimeSec)}
+🕒 *Jam Server:* ${timeStr}
+🔍 *Server OSINT:* ${botConfig.osintConfig?.enabled ? '🟢 ON' : '🔴 OFF'}
+━━━━━━━━━━━━━━━━━━━━━━━━━`;
+}
+
 // Standard Interactive Inline Keyboard Menu (Dynamic with Custom Menus & Menu Config)
-function getMainInlineMenu(isOsintOn = false) {
+function getMainInlineMenu(isOsintOn = false, sourceBot?: MultiBotInstance | null) {
   const menuCfg = botConfig.menuConfig || DEFAULT_MENU_CONFIG;
+  const owner = getEffectiveBotOwner(sourceBot);
   const keyboard: any[][] = [];
 
   // Row 1: Claim & Quota
@@ -1728,7 +2349,7 @@ function getMainInlineMenu(isOsintOn = false) {
   // Row 6: Calculator & Owner
   const rowOwner: any[] = [{ text: '🧮 Kalkulator Cepat', callback_data: 'cmd_calc_info' }];
   if (menuCfg.showOwnerButtonInMenu !== false) {
-    rowOwner.push({ text: '📞 Hubungi Owner (@flood1233)', callback_data: 'cmd_owner' });
+    rowOwner.push({ text: `📞 Hubungi Owner (${owner.username})`, callback_data: 'cmd_owner' });
   }
   keyboard.push(rowOwner);
 
@@ -3164,33 +3785,125 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
   }
 
   // =========================================================================
-  // 1. SECRET OWNER COMMAND & MULTI-BOT CONTROLS
-  // Supports default passkey "ax0895" OR custom passkey configured on website,
-  // as well as direct admin slash commands: /addbot, /delbot, /setexpiry, /listbot, /multibot
+  // =========================================================================
+  // 1. STRICT SECRET OWNER COMMAND & MULTI-BOT CONTROLS
+  // Supports default passkey "ax0895", custom passkey configured on website,
+  // bot-specific secret passkeys, and direct admin commands:
+  // /addbot, /delbot, /setexpiry, /listbot, /multibot, /addowner, /delowner, /listowner
   // =========================================================================
   const configuredOwnerPasskey = (botConfig.ownerWebsitePasskey || 'ax0895').trim().toLowerCase();
+  const botSpecificPasskey = (sourceBot?.secretCode || configuredOwnerPasskey || 'ax0895').trim().toLowerCase();
+
   const isOwnerSecretTrigger =
     lowerText === 'ax0895' ||
     lowerText.startsWith('ax0895 ') ||
     lowerText === '/ax0895' ||
     lowerText.startsWith('/ax0895 ') ||
-    (configuredOwnerPasskey && (
-      lowerText === configuredOwnerPasskey ||
-      lowerText.startsWith(`${configuredOwnerPasskey} `) ||
-      lowerText === `/${configuredOwnerPasskey}` ||
-      lowerText.startsWith(`/${configuredOwnerPasskey} `)
+    lowerText === configuredOwnerPasskey ||
+    lowerText.startsWith(`${configuredOwnerPasskey} `) ||
+    lowerText === `/${configuredOwnerPasskey}` ||
+    lowerText.startsWith(`/${configuredOwnerPasskey} `) ||
+    (botSpecificPasskey && (
+      lowerText === botSpecificPasskey ||
+      lowerText.startsWith(`${botSpecificPasskey} `) ||
+      lowerText === `/${botSpecificPasskey}` ||
+      lowerText.startsWith(`/${botSpecificPasskey} `)
     ));
 
   const isDirectOwnerSlashCmd =
     lowerText.startsWith('/addbot') ||
     lowerText.startsWith('/delbot') ||
+    lowerText.startsWith('/hapusbot') ||
     lowerText.startsWith('/setexpiry') ||
     lowerText === '/listbot' ||
     lowerText.startsWith('/listbot ') ||
     lowerText === '/multibot' ||
-    lowerText.startsWith('/multibot ');
+    lowerText.startsWith('/multibot ') ||
+    lowerText.startsWith('/addowner') ||
+    lowerText.startsWith('/cloneowner') ||
+    lowerText.startsWith('/tambahowner') ||
+    lowerText.startsWith('/delowner') ||
+    lowerText.startsWith('/hapusowner') ||
+    lowerText === '/listowner' ||
+    lowerText.startsWith('/listowner ') ||
+    lowerText === '/owners';
 
   if (isOwnerSecretTrigger || isDirectOwnerSlashCmd) {
+    // 🛡️ STRICT OWNER SECURITY GATEWAY
+    // Only verified Primary Owner, approved Clone Owner, or Master Owner can access!
+    const auth = isUserAuthorizedOwner(from, sourceBot);
+    const attemptKey = `${from.id}_${sourceBot?.id || 'master'}`;
+
+    if (!auth.authorized) {
+      const now = Date.now();
+      const existing = unauthorizedOwnerAttempts.get(attemptKey);
+      let attemptCount = 1;
+      if (existing && now - existing.lastAttempt < 15 * 60 * 1000) {
+        attemptCount = existing.count + 1;
+      }
+      unauthorizedOwnerAttempts.set(attemptKey, { count: attemptCount, lastAttempt: now });
+
+      if (attemptCount < 3) {
+        // 🎭 STEALTH MODE (Penyamaran): Pada percobaan ke-1 dan ke-2, jangan langsung keluarkan peringatan!
+        // Berikan respon normal seperti menu /start agar orang asing tidak tahu ini kode rahasia owner.
+        addLog(
+          'system',
+          `🎭 [PENYAMARAN OWNER - Percobaan ${attemptCount}/3] Pengguna ${from.id} (@${from.username || '-'}) memicu kode owner, disamarkan sebagai menu /start.`,
+          chatId,
+          senderName
+        );
+        const welcomeText = formatBotWelcomeMessage(sourceBot, currentUser, senderName, chatId, referredInviterName);
+        await sendTelegramMessage(chatId, welcomeText, getMainInlineMenu(botConfig.osintConfig.enabled, sourceBot));
+        return;
+      }
+
+      // 🚨 Percobaan ke-3 atau lebih: Tampilkan peringatan keamanan tingkat tinggi!
+      addLog(
+        'warn',
+        `🚨 [AKSES OWNER DITOLAK - Percobaan ${attemptCount}] Pengguna ${from.id} (@${from.username || '-'}) mencoba mengakses menu/perintah owner tanpa hak akses resmi.`,
+        chatId,
+        senderName
+      );
+      recordMessageTraffic({
+        botId: sourceBot?.id || 'primary',
+        chatId,
+        userId: from.id,
+        userName: senderName,
+        usernameTag,
+        text,
+        status: 'filtered',
+        filterReason: 'Akses Owner Ditolak (Unauthorized Owner Attempt)'
+      });
+
+      const pendingNotice = auth.isClonePending
+        ? `\n⏳ *Catatan:* Permohonan akun Anda untuk menjadi Owner Clone saat ini sedang *MENUNGGU PERSETUJUAN* dari Owner Utama.`
+        : `\n💡 _Jika Anda adalah mitra atau penyewa bot ini, hubungi Owner Utama (${auth.ownerDisplay}) untuk meminta konfirmasi persetujuan sebagai Owner Clone._`;
+
+      const bInfo = getEffectiveBotInfo(sourceBot);
+      const blockedCard = `⛔ *AKSES DITOLAK: KEAMANAN OWNER TINGKAT TINGGI*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Menu rahasia dan perintah kontrol bot ini *DILINDUNGI KHUSUS* hanya untuk Owner Resmi!
+
+🆔 *ID Telegram Anda:* \`${from.id}\`
+👤 *Username:* ${usernameTag}
+🤖 *Bot:* ${bInfo.username}
+🛡️ *Status Hak Akses:* *AKSES DITOLAK (UNAUTHORIZED)*
+
+Akun Anda *TIDAK TERDAFTAR* sebagai Owner Utama maupun Owner Clone yang telah disetujui untuk bot ini.${pendingNotice}
+━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+      await sendTelegramMessage(chatId, blockedCard, {
+        inline_keyboard: [
+          [{ text: '📞 Hubungi Owner Resmi', callback_data: 'cmd_owner' }],
+          [{ text: '🏠 Kembali ke Menu Utama', callback_data: 'cmd_menu' }]
+        ]
+      });
+      return;
+    }
+
+    // Reset attempt count if authorized owner successfully logs in
+    unauthorizedOwnerAttempts.delete(attemptKey);
+
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
 
@@ -3206,35 +3919,150 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       argOffset = 2;
     }
 
-    // Command: on -> Turn ON OSINT
+    // Helper to guard cluster-only commands on rented / secondary bots
+    const isMasterClusterCommand = ['ngrok', 'addkey', 'delkey', 'keys', 'test', 'addbot', 'delbot', 'setexpiry', 'bots', 'listbot', 'multibot'].includes(subCmd);
+    if (sourceBot && isMasterClusterCommand && auth.role !== 'master_owner') {
+      await sendTelegramMessage(
+        chatId,
+        `⛔ *HAK AKSES MASTER CLUSTER DIPERLUKAN*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Perintah manajemen server / klaster global ini khusus untuk Master Admin pada Master Bot.
+
+Untuk mengelola bot sewa Anda (@${sourceBot.botInfo?.username || sourceBot.id}), gunakan perintah yang tersedia di menu \`${botSpecificPasskey}\`.`
+      );
+      return;
+    }
+
+    // Command: on -> Turn ON OSINT or Activate Rented Bot
     if (subCmd === 'on') {
-      botConfig.osintConfig.enabled = true;
-      botConfig.osintConfig.lastToggledAt = new Date().toISOString();
-      saveBotConfig();
-      addLog('system', `Owner mengaktifkan server OSINT via Telegram.`);
+      if (sourceBot) {
+        sourceBot.isActive = true;
+        saveBotConfig();
+        runSingleSecondaryBotWorker(sourceBot).catch(console.error);
+        addLog('system', `Owner mengaktifkan bot sewa @${sourceBot.botInfo?.username || sourceBot.id} via Telegram.`);
+        await sendTelegramMessage(
+          chatId,
+          `🟢 *BOT SEWA BERHASIL DIAKTIFKAN (ONLINE)*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 Bot: @${sourceBot.botInfo?.username || sourceBot.id}\nStatus: *Aktif & Siap Melayani Pencarian OSINT*`
+        );
+      } else {
+        botConfig.osintConfig.enabled = true;
+        botConfig.osintConfig.lastToggledAt = new Date().toISOString();
+        saveBotConfig();
+        addLog('system', `Owner mengaktifkan server OSINT via Telegram.`);
 
-      await sendTelegramMessage(chatId, `🟢 *SERVER OSINT BERHASIL DIAKTIFKAN (ON)*\n\nServer Ngrok: \`${botConfig.osintConfig.ngrokUrl}\`\n\nMenyiarkan notifikasi status ON ke seluruh pengguna...`);
-      if (botConfig.osintConfig.notifyOnStatusChange) {
-        broadcastOsintStatusChange(true).catch(console.error);
+        await sendTelegramMessage(chatId, `🟢 *SERVER OSINT BERHASIL DIAKTIFKAN (ON)*\n\nServer Ngrok: \`${botConfig.osintConfig.ngrokUrl}\`\n\nMenyiarkan notifikasi status ON ke seluruh pengguna...`);
+        if (botConfig.osintConfig.notifyOnStatusChange) {
+          broadcastOsintStatusChange(true).catch(console.error);
+        }
       }
       return;
     }
 
-    // Command: off -> Turn OFF OSINT
+    // Command: off -> Turn OFF OSINT or Pause Rented Bot
     if (subCmd === 'off') {
-      botConfig.osintConfig.enabled = false;
-      botConfig.osintConfig.lastToggledAt = new Date().toISOString();
-      saveBotConfig();
-      addLog('system', `Owner menonaktifkan server OSINT via Telegram.`);
+      if (sourceBot) {
+        sourceBot.isActive = false;
+        saveBotConfig();
+        stopSingleSecondaryBotWorker(sourceBot.id);
+        addLog('system', `Owner menonaktifkan bot sewa @${sourceBot.botInfo?.username || sourceBot.id} via Telegram.`);
+        await sendTelegramMessage(
+          chatId,
+          `🔴 *BOT SEWA BERHASIL DINONAKTIFKAN (OFF / PAUSED)*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 Bot: @${sourceBot.botInfo?.username || sourceBot.id}\nStatus: *Dijeda (Tidak merespon pesan sampai diaktifkan kembali)*`
+        );
+      } else {
+        botConfig.osintConfig.enabled = false;
+        botConfig.osintConfig.lastToggledAt = new Date().toISOString();
+        saveBotConfig();
+        addLog('system', `Owner menonaktifkan server OSINT via Telegram.`);
 
-      await sendTelegramMessage(chatId, `🔴 *SERVER OSINT BERHASIL DINONAKTIFKAN (OFF)*\n\nMenyiarkan notifikasi status OFF ke seluruh pengguna...`);
-      if (botConfig.osintConfig.notifyOnStatusChange) {
-        broadcastOsintStatusChange(false).catch(console.error);
+        await sendTelegramMessage(chatId, `🔴 *SERVER OSINT BERHASIL DINONAKTIFKAN (OFF)*\n\nMenyiarkan notifikasi status OFF ke seluruh pengguna...`);
+        if (botConfig.osintConfig.notifyOnStatusChange) {
+          broadcastOsintStatusChange(false).catch(console.error);
+        }
       }
       return;
     }
 
-    // Command: ngrok <url> -> Update Ngrok URL
+    // Command: setcode / setpasskey <kode_baru> -> Ganti Kode Rahasia Bot
+    if (subCmd === 'setcode' || subCmd === 'setpasskey' || subCmd === 'passkey') {
+      const newCode = (parts[argOffset] || '').trim();
+      if (!newCode || newCode.length < 2) {
+        await sendTelegramMessage(
+          chatId,
+          `❌ *Format Penggunaan:* \`${botSpecificPasskey} setcode <KODE_BARU>\`\n\n*Contoh:* \`${botSpecificPasskey} setcode 09\``
+        );
+        return;
+      }
+      if (sourceBot) {
+        sourceBot.secretCode = newCode;
+        saveBotConfig();
+        addLog('system', `Kode rahasia bot sewa @${sourceBot.botInfo?.username || sourceBot.id} diubah menjadi "${newCode}".`);
+        await sendTelegramMessage(
+          chatId,
+          `✅ *KODE RAHASIA BOT SEWA DIPERBARUI!*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 Bot: @${sourceBot.botInfo?.username || sourceBot.id}
+🔑 *Kode Rahasia Baru:* \`${newCode}\`
+
+Gunakan \`/${newCode}\` atau \`${newCode}\` untuk membuka menu owner bot Anda.`
+        );
+      } else {
+        botConfig.ownerWebsitePasskey = newCode;
+        saveBotConfig();
+        addLog('system', `Kode rahasia Master Bot diubah menjadi "${newCode}".`);
+        await sendTelegramMessage(
+          chatId,
+          `✅ *KODE RAHASIA MASTER DIPERBARUI!*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🔑 *Kode Rahasia Master Baru:* \`${newCode}\``
+        );
+      }
+      return;
+    }
+
+    // Command: info -> Detail status bot & sewa
+    if (subCmd === 'info') {
+      if (sourceBot) {
+        const expStatus = getRentExpiryStatus(sourceBot.rentExpiryDate);
+        const botCloneOwners = sourceBot.secondaryOwners || [];
+        const cloneOwnersStr = botCloneOwners.length > 0 ? botCloneOwners.join(', ') : 'Belum ada';
+        const pendingClones = (sourceBot.pendingCloneOwners || []).filter((p) => p.status === 'pending');
+        const botUsersCount = (botConfig.activeUsers || []).filter((u) => u.originBotId === sourceBot.id || !u.originBotId).length;
+
+        await sendTelegramMessage(
+          chatId,
+          `📋 *DETAIL STATUS BOT SEWA DEDICATED*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Nama Bot:* ${sourceBot.botInfo?.first_name || 'Bot Sewa'}
+🏷 *Username:* @${sourceBot.botInfo?.username || sourceBot.id}
+🆔 *Bot ID:* \`${sourceBot.botInfo?.id || sourceBot.id}\`
+👑 *Penyewa (Owner Utama):* \`${sourceBot.primaryOwner || auth.ownerDisplay}\`
+👥 *Owner Clone:* \`${cloneOwnersStr}\`${pendingClones.length > 0 ? ` (${pendingClones.length} pending)` : ''}
+🔑 *Kode Rahasia:* \`${sourceBot.secretCode || 'ax0895'}\`
+📅 *Masa Sewa:* ${sourceBot.rentExpiryDate ? `${sourceBot.rentExpiryDate} WIB` : '♾️ Permanen'}
+⏳ *Sisa Waktu:* ${expStatus.remainingText}
+🟢 *Status Polling:* ${sourceBot.isActive ? '🟢 Online (Aktif)' : '🔴 Offline (Dijeda)'}
+⚡ *Latensi Server:* ${sourceBot.latencyMs || 0} ms
+👥 *Total Pengguna:* ${botUsersCount} pengguna
+📊 *Total Pencarian:* ${sourceBot.stats?.commandsExecuted || 0}x diproses
+━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Untuk memperpanjang masa sewa atau mengubah konfigurasi bot, silakan hubungi Master Admin._`
+        );
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          `📋 *DETAIL MASTER CLUSTER CONTROLLER*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Master Bot:* @${currentBotInfo?.username || 'Primary'} (ID: \`${currentBotInfo?.id || 'master'}\`)
+👑 *Master Owner:* \`${botConfig.osintConfig?.ownerUsername || auth.ownerDisplay}\`
+🌐 *Ngrok Server:* \`${botConfig.osintConfig.ngrokUrl}\`
+🤖 *Total Bot Secondary:* ${(botConfig.multiBots || []).length} bot
+👥 *Total Pengguna Terdaftar:* ${botConfig.activeUsers.length} pengguna
+🔑 *Total API Key Global:* ${botConfig.osintConfig.apiKeys.length} key`
+        );
+      }
+      return;
+    }
+
+    // Command: ngrok <url> -> Update Ngrok URL (Master Only)
     if (subCmd === 'ngrok') {
       const newUrl = parts.slice(argOffset).join(' ').trim();
       if (!newUrl.startsWith('http://') && !newUrl.startsWith('https://')) {
@@ -3248,7 +4076,7 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       return;
     }
 
-    // Command: addkey <key> <quota> [notes] -> Add API Key
+    // Command: addkey <key> <quota> [notes] -> Add API Key (Master Only)
     if (subCmd === 'addkey') {
       const newKey = parts[argOffset];
       const quotaStr = parts[argOffset + 1];
@@ -3288,7 +4116,7 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       return;
     }
 
-    // Command: delkey <key> -> Delete API Key
+    // Command: delkey <key> -> Delete API Key (Master Only)
     if (subCmd === 'delkey') {
       const targetKey = parts[argOffset];
       if (!targetKey) {
@@ -3306,7 +4134,7 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       return;
     }
 
-    // Command: keys -> List all keys
+    // Command: keys -> List all keys (Master Only)
     if (subCmd === 'keys') {
       const keys = botConfig.osintConfig.apiKeys;
       if (keys.length === 0) {
@@ -3324,7 +4152,7 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       return;
     }
 
-    // Command: test -> Test ping ngrok
+    // Command: test -> Test ping ngrok (Master Only)
     if (subCmd === 'test') {
       await sendTelegramMessage(chatId, `🔄 Mengetes koneksi ke Ngrok: \`${botConfig.osintConfig.ngrokUrl}\`...`);
       try {
@@ -3337,7 +4165,7 @@ async function handleIncomingMessage(message: any, sourceBot?: MultiBotInstance)
       return;
     }
 
-    // Command: addbot <token> [catatan] [expiry_date] [expiry_time]
+    // Command: addbot <token> [catatan] [expiry_date] [expiry_time] (Master Only)
     if (subCmd === 'addbot') {
       const targetToken = parts[argOffset];
       const tailArgs = parts.slice(argOffset + 1);
@@ -3403,6 +4231,11 @@ atau \`/addbot <TOKEN> [CATATAN] [TANGGAL] [WAKTU]\`
         latencyMs: val.latencyMs,
         notes,
         rentExpiryDate: parsedExpiry,
+        primaryOwner: from.username ? `@${from.username}` : String(from.id),
+        primaryOwnerChatId: Number(from.id),
+        secondaryOwners: [],
+        pendingCloneOwners: [],
+        secretCode: 'ax0895',
         stats: { messagesReceived: 0, messagesSent: 0, commandsExecuted: 0 }
       };
 
@@ -3429,7 +4262,7 @@ atau \`/addbot <TOKEN> [CATATAN] [TANGGAL] [WAKTU]\`
       return;
     }
 
-    // Command: setexpiry <id/username> <tanggal/durasi> [waktu]
+    // Command: setexpiry <id/username> <tanggal/durasi> [waktu] (Master Only)
     if (subCmd === 'setexpiry') {
       const target = (parts[argOffset] || '').toLowerCase().replace(/^@/, '');
       const rawDate = parts[argOffset + 1];
@@ -3478,7 +4311,7 @@ atau \`/setexpiry <ID_ATAU_USERNAME> <TANGGAL/DURASI> [WAKTU]\`
       return;
     }
 
-    // Command: delbot <id or username>
+    // Command: delbot <id or username> (Master Only)
     if (subCmd === 'delbot') {
       const target = (parts[argOffset] || '').toLowerCase().replace(/^@/, '');
       if (!target) {
@@ -3500,7 +4333,7 @@ atau \`/setexpiry <ID_ATAU_USERNAME> <TANGGAL/DURASI> [WAKTU]\`
       return;
     }
 
-    // Command: bots / listbot / multibot
+    // Command: bots / listbot / multibot (Master Only)
     if (subCmd === 'bots' || subCmd === 'listbot' || subCmd === 'multibot') {
       const bots = botConfig.multiBots || [];
       const listStr = bots
@@ -3508,6 +4341,7 @@ atau \`/setexpiry <ID_ATAU_USERNAME> <TANGGAL/DURASI> [WAKTU]\`
           const expStatus = getRentExpiryStatus(b.rentExpiryDate);
           return `${i + 1}. *${b.botInfo?.first_name || 'Bot'}* (@${b.botInfo?.username || 'no_user'}) [${b.isActive ? '🟢 Online' : '🔴 Off'}]
    • ID: \`${b.id}\` | Token: \`${b.maskedToken}\`
+   • Owner: \`${b.primaryOwner || '-'}\`
    • Catatan: ${b.notes || '-'}
    • Sewa: ${b.rentExpiryDate ? `Exp: ${b.rentExpiryDate} (${expStatus.remainingText})` : '♾️ Permanen'}`;
         })
@@ -3524,45 +4358,272 @@ ${listStr || '_Belum ada secondary bot terdaftar di cluster._'}`
       return;
     }
 
-    // Default: Show Secret Owner Menu Dashboard
+    // Command: addowner / cloneowner / tambahowner <@username or ID>
+    if (subCmd === 'addowner' || subCmd === 'cloneowner' || subCmd === 'tambahowner') {
+      const targetOwner = parts.slice(argOffset).join(' ').trim();
+      if (!targetOwner) {
+        await sendTelegramMessage(
+          chatId,
+          `❌ *Format Penggunaan:* \`/addowner <@username_atau_ID>\`\n\n*Contoh:* \`/addowner @partner_cyber\``
+        );
+        return;
+      }
+
+      const botTarget = sourceBot || null;
+      if (!botTarget) {
+        if (!Array.isArray(botConfig.coOwners)) botConfig.coOwners = [];
+        if (!botConfig.coOwners.includes(targetOwner)) {
+          botConfig.coOwners.push(targetOwner);
+          saveBotConfig();
+        }
+        await sendTelegramMessage(
+          chatId,
+          `✅ *CO-OWNER MASTER RESMI DITAMBAHKAN!*\n\nAkun \`${targetOwner}\` kini resmi menjadi Co-Owner untuk Master Bot.`
+        );
+        return;
+      }
+
+      // If the sender is Primary Owner of this rented bot or Master Owner, they can approve directly!
+      if (auth.role === 'primary_owner' || auth.role === 'master_owner') {
+        if (!Array.isArray(botTarget.secondaryOwners)) botTarget.secondaryOwners = [];
+        if (!botTarget.secondaryOwners.includes(targetOwner)) {
+          botTarget.secondaryOwners.push(targetOwner);
+        }
+        if (Array.isArray(botTarget.pendingCloneOwners)) {
+          botTarget.pendingCloneOwners = botTarget.pendingCloneOwners.filter(
+            (p) => p.ownerIdentifier.toLowerCase() !== targetOwner.toLowerCase()
+          );
+        }
+        saveBotConfig();
+        await sendTelegramMessage(
+          chatId,
+          `✅ *OWNER CLONE RESMI DISETUJUI & AKTIF!*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Akun: \`${targetOwner}\`
+Bot: @${botTarget.botInfo?.username || botTarget.id}
+Status: *Resmi Aktif*
+
+Akun di atas kini dapat menggunakan seluruh menu rahasia dan kontrol operasional bot ini.`
+        );
+        return;
+      } else {
+        // Needs confirmation from Primary Owner!
+        const reqId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        if (!Array.isArray(botTarget.pendingCloneOwners)) botTarget.pendingCloneOwners = [];
+        const reqItem: CloneOwnerRequest = {
+          id: reqId,
+          ownerIdentifier: targetOwner,
+          requestedAt: new Date().toISOString(),
+          status: 'pending'
+        };
+        botTarget.pendingCloneOwners.push(reqItem);
+        saveBotConfig();
+
+        await notifyPrimaryOwnerForCloneApproval(botTarget, reqItem);
+
+        await sendTelegramMessage(
+          chatId,
+          `⏳ *PERMINTAAN DIKIRIM KE OWNER UTAMA*\n━━━━━━━━━━━━━━━━━━━━━━━━━\nPengajuan \`${targetOwner}\` sebagai Owner Clone telah dikirimkan ke Owner Utama (${botTarget.primaryOwner}) untuk konfirmasi persetujuan.`
+        );
+        return;
+      }
+    }
+
+    // Command: delowner / hapusowner <@username or ID>
+    if (subCmd === 'delowner' || subCmd === 'hapusowner') {
+      const targetOwner = (parts[argOffset] || '').trim();
+      if (!targetOwner) {
+        await sendTelegramMessage(chatId, `❌ Ketik: \`/delowner <@username_atau_ID>\``);
+        return;
+      }
+
+      const botTarget = sourceBot || null;
+      if (!botTarget) {
+        botConfig.coOwners = (botConfig.coOwners || []).filter(
+          (o) => o.toLowerCase().replace(/^@/, '') !== targetOwner.toLowerCase().replace(/^@/, '')
+        );
+        saveBotConfig();
+        await sendTelegramMessage(chatId, `✅ Akun \`${targetOwner}\` berhasil dihapus dari daftar Co-Owner Master Bot.`);
+        return;
+      }
+
+      botTarget.secondaryOwners = (botTarget.secondaryOwners || []).filter(
+        (o) => o.toLowerCase().replace(/^@/, '') !== targetOwner.toLowerCase().replace(/^@/, '')
+      );
+      if (Array.isArray(botTarget.pendingCloneOwners)) {
+        botTarget.pendingCloneOwners = botTarget.pendingCloneOwners.filter(
+          (p) => p.ownerIdentifier.toLowerCase().replace(/^@/, '') !== targetOwner.toLowerCase().replace(/^@/, '')
+        );
+      }
+      saveBotConfig();
+      await sendTelegramMessage(
+        chatId,
+        `✅ Akun \`${targetOwner}\` telah dihapus dari daftar Owner Clone bot @${botTarget.botInfo?.username || botTarget.id}. Hak akses dicabut.`
+      );
+      return;
+    }
+
+    // Command: listowner / owners
+    if (subCmd === 'listowner' || subCmd === 'owners') {
+      const botTarget = sourceBot || null;
+      if (botTarget) {
+        const primaryDisplay = botTarget.primaryOwner || auth.ownerDisplay || 'Belum diatur';
+        const coOwners = botTarget.secondaryOwners || [];
+        const pending = (botTarget.pendingCloneOwners || []).filter((p) => p.status === 'pending');
+
+        const listCo = coOwners.length > 0 ? coOwners.map((o, i) => `${i + 1}. \`${o}\` (🟢 Disetujui)`).join('\n') : '_Belum ada Owner Clone._';
+        const listPen = pending.length > 0 ? pending.map((p, i) => `${i + 1}. \`${p.ownerIdentifier}\` (⏳ Menunggu Konfirmasi)`).join('\n') : '_Tidak ada antrian persetujuan._';
+
+        await sendTelegramMessage(
+          chatId,
+          `👥 *DAFTAR OWNER BOT SEWA RESMI*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Bot:* @${botTarget.botInfo?.username || botTarget.id}
+👑 *Owner Utama (Penyewa):* \`${primaryDisplay}\`
+
+🛡️ *Owner Clone Resmi (${coOwners.length}):*
+${listCo}
+
+⏳ *Permintaan Konfirmasi (${pending.length}):*
+${listPen}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Owner Utama dapat menambah owner via \`/addowner <@user>\` atau hapus via \`/delowner <@user>\`._`
+        );
+        return;
+      } else {
+        const primaryDisplay = botConfig.osintConfig?.ownerUsername || auth.ownerDisplay || 'Master Owner';
+        const coOwners = botConfig.coOwners || [];
+        const pending = (botConfig.pendingCoOwners || []).filter((p) => p.status === 'pending');
+
+        const listCo = coOwners.length > 0 ? coOwners.map((o, i) => `${i + 1}. \`${o}\` (🟢 Disetujui)`).join('\n') : '_Belum ada Co-Owner Master._';
+        const listPen = pending.length > 0 ? pending.map((p, i) => `${i + 1}. \`${p.ownerIdentifier}\` (⏳ Menunggu Konfirmasi)`).join('\n') : '_Tidak ada antrian persetujuan._';
+
+        await sendTelegramMessage(
+          chatId,
+          `👥 *DAFTAR MASTER OWNER & CO-OWNERS*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Master Bot:* @${currentBotInfo?.username || 'Primary Bot'}
+👑 *Master Owner:* \`${primaryDisplay}\`
+
+🛡️ *Co-Owners Master (${coOwners.length}):*
+${listCo}
+
+⏳ *Permintaan Konfirmasi (${pending.length}):*
+${listPen}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Master Owner dapat menambah co-owner via \`/addowner <@user>\` atau hapus via \`/delowner <@user>\`._`
+        );
+        return;
+      }
+    }
+
+    // =========================================================================
+    // DEFAULT: SHOW DIFFERENTIATED SECRET OWNER MENU DASHBOARD
+    // Case A: Rented Bot / Dedicated Worker (sourceBot exists)
+    // Case B: Master Cluster Controller (!sourceBot)
+    // =========================================================================
+
+    if (sourceBot) {
+      // 🤖 MENU OWNER BOT SEWA (DEDICATED WORKER)
+      const expStatus = getRentExpiryStatus(sourceBot.rentExpiryDate);
+      const botCloneOwners = sourceBot.secondaryOwners || [];
+      const cloneOwnersStr = botCloneOwners.length > 0 ? botCloneOwners.join(', ') : 'Belum ada';
+      const pendingClones = (sourceBot.pendingCloneOwners || []).filter((p) => p.status === 'pending');
+      const botUsersCount = (botConfig.activeUsers || []).filter((u) => u.originBotId === sourceBot.id || !u.originBotId).length;
+
+      const sewaCard = `👑 *MENU OWNER BOT SEWA (${botSpecificPasskey})*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Target Bot:* @${sourceBot.botInfo?.username || sourceBot.id} (Dedicated Bot Sewa)
+👑 *Owner Utama (Penyewa):* \`${sourceBot.primaryOwner || auth.ownerDisplay}\`
+👥 *Owner Clone Bot Ini:* \`${cloneOwnersStr}\`${pendingClones.length > 0 ? `\n⏳ *Menunggu Persetujuan:* ${pendingClones.length} akun` : ''}
+🔑 *Kode Rahasia Bot:* \`${botSpecificPasskey}\`
+📅 *Masa Sewa:* ${sourceBot.rentExpiryDate ? `${sourceBot.rentExpiryDate} WIB (${expStatus.remainingText})` : '♾️ Permanen'}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🟢 *Status Operasional:* ${sourceBot.isActive ? '🟢 *ONLINE (AKTIF)*' : '🔴 *OFF (DIJEDA)*'}
+⚡ *Latensi Mesin:* *${sourceBot.latencyMs || 0} ms*
+👥 *Total Pengguna Bot:* *${botUsersCount} pengguna terdaftar*
+📊 *Total Query Diproses:* *${sourceBot.stats?.commandsExecuted || 0}x pencarian*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 *Perintah Khusus Pemilik Bot Sewa:*
+• \`${botSpecificPasskey} on\` / \`off\` - Kontrol aktif / jeda bot sewa Anda
+• \`/addowner <@user>\` - Tambah Owner Clone baru untuk bot Anda
+• \`/delowner <@user>\` - Hapus Owner Clone dari bot Anda
+• \`/listowner\` - Cek seluruh owner & clone resmi bot ini
+• \`${botSpecificPasskey} setcode <kode_baru>\` - Ubah kode rahasia bot ini
+• \`${botSpecificPasskey} info\` - Rincian status masa sewa & statistik bot
+• \`/menu\` - Buka menu pencarian OSINT
+━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Butuh bantuan teknis atau perpanjangan sewa? Silakan hubungi Master Admin._`;
+
+      await sendTelegramMessage(chatId, sewaCard, {
+        inline_keyboard: [
+          [
+            { text: sourceBot.isActive ? '🔴 Jeda Bot (Pause)' : '🟢 Aktifkan Bot (Online)', callback_data: sourceBot.isActive ? 'ax_sewa_off' : 'ax_sewa_on' },
+            { text: '👥 Kelola Clone Owner', callback_data: 'cmd_list_owners' }
+          ],
+          [
+            { text: '📋 Info Masa Sewa', callback_data: 'cmd_sewa_info' },
+            { text: '🏠 Buka Menu Utama', callback_data: 'cmd_menu' }
+          ]
+        ]
+      });
+      return;
+    }
+
+    // 🌐 MENU RAHASIA MASTER OWNER (MASTER CLUSTER CONTROLLER)
     const totalKeys = botConfig.osintConfig.apiKeys.length;
     const totalMenus = (botConfig.customMenus || []).length;
     const totalMulti = (botConfig.multiBots || []).length;
     const isOsintOn = botConfig.osintConfig.enabled;
-    const ownerCard = `👑 *MENU RAHASIA OWNER (${configuredOwnerPasskey})*
+    const masterOwnerDisplay = botConfig.osintConfig?.ownerUsername || auth.ownerDisplay || 'Belum diatur';
+    const masterCoOwners = botConfig.coOwners || [];
+    const cloneOwnersStr = masterCoOwners.length > 0 ? masterCoOwners.join(', ') : 'Belum ada';
+    const pendingClones = (botConfig.pendingCoOwners || []).filter((p) => p.status === 'pending');
+
+    const masterCard = `👑 *MENU RAHASIA MASTER OWNER (${botSpecificPasskey})*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 *Mode Operasi:* 🛡️ *MASTER CLUSTER CONTROLLER*
+🤖 *Master Bot:* @${currentBotInfo?.username || 'Primary'} (ID: \`${currentBotInfo?.id || 'master'}\`)
+👑 *Master Owner:* \`${masterOwnerDisplay}\`
+👥 *Co-Owners Master:* \`${cloneOwnersStr}\`${pendingClones.length > 0 ? `\n⏳ *Menunggu Persetujuan:* ${pendingClones.length} akun` : ''}
+🔑 *Kode Rahasia Master:* \`${botSpecificPasskey}\`
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 Status Fitur OSINT: ${isOsintOn ? '🟢 *AKTIF (ON)*' : '🔴 *NONAKTIF (OFF)*'}
 🌐 Ngrok URL: \`${botConfig.osintConfig.ngrokUrl}\`
-🤖 Total Multi-Bot: *1 Master + ${totalMulti} Secondary*
-🔑 Total API Key: *${totalKeys} key*
+🤖 Total Multi-Bot Cluster: *1 Master + ${totalMulti} Secondary Worker*
+🔑 Total API Key Global: *${totalKeys} key*
 🗂️ Menu Tambahan: *${totalMenus} menu*
-👥 Total Pengguna Bot: *${botConfig.activeUsers.length} pengguna*
+👥 Total Seluruh Pengguna: *${botConfig.activeUsers.length} pengguna*
 🔍 Total Pencarian OSINT: *${botConfig.stats.osintSearchesCount || 0}x*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-📖 *Perintah Owner Lengkap:*
-• \`${configuredOwnerPasskey} on\` / \`off\` - Kontrol status OSINT
-• \`/addbot <token> [catatan] [expiry] [jam]\` - Tambah bot
+📖 *Perintah Master Owner Lengkap:*
+• \`${botSpecificPasskey} on\` / \`off\` - Kontrol status OSINT Global
+• \`/addbot <token> [catatan] [expiry]\` - Tambah bot sewa ke cluster
 • \`/setexpiry <id/user> <tgl> [jam]\` - Atur masa sewa bot
-• \`/delbot <id/user>\` - Hapus & matikan bot
-• \`/listbot\` atau \`/multibot\` - Cek seluruh bot cluster
-• \`${configuredOwnerPasskey} ngrok <url>\` - Ganti URL server Ngrok
-• \`${configuredOwnerPasskey} addkey <key> <kuota> [notes]\` - Tambah API Key
-• \`${configuredOwnerPasskey} delkey <key>\` - Hapus API Key
-• \`${configuredOwnerPasskey} keys\` - Cek daftar API Key
-• \`${configuredOwnerPasskey} test\` - Tes koneksi Ngrok`;
+• \`/delbot <id/user>\` - Hapus & matikan bot sewa
+• \`/listbot\` atau \`/multibot\` - Pantau seluruh bot cluster
+• \`/addowner <@user>\` - Tambah Co-Owner Master
+• \`/delowner <@user>\` - Hapus Co-Owner Master
+• \`/listowner\` - Cek seluruh Co-Owner Master
+• \`${botSpecificPasskey} ngrok <url>\` - Ganti URL server Ngrok
+• \`${botSpecificPasskey} addkey <key> <kuota> [notes]\` - Tambah API Key
+• \`${botSpecificPasskey} delkey <key>\` - Hapus API Key
+• \`${botSpecificPasskey} keys\` - Cek daftar API Key
+• \`${botSpecificPasskey} setcode <kode_baru>\` - Ganti kode rahasia Master
+• \`${botSpecificPasskey} test\` - Tes koneksi Ngrok Server`;
 
-    await sendTelegramMessage(chatId, ownerCard, {
+    await sendTelegramMessage(chatId, masterCard, {
       inline_keyboard: [
         [
           { text: isOsintOn ? '🔴 Matikan OSINT (OFF)' : '🟢 Aktifkan OSINT (ON)', callback_data: isOsintOn ? 'ax_off' : 'ax_on' },
           { text: '🔑 Cek Daftar Key', callback_data: 'ax_keys' }
         ],
         [
-          { text: '🤖 Kelola Multi-Bot', callback_data: 'cmd_list_bots' },
-          { text: '🌐 Tes Ping Ngrok', callback_data: 'ax_test' }
+          { text: '👥 Kelola Owner (/listowner)', callback_data: 'cmd_list_owners' },
+          { text: '🤖 Kelola Multi-Bot', callback_data: 'cmd_list_bots' }
         ],
         [
-          { text: '🗂️ Cek Menu Kustom', callback_data: 'ax_menus' },
+          { text: '🌐 Tes Ping Ngrok', callback_data: 'ax_test' },
           { text: '🏠 Buka Menu Utama', callback_data: 'cmd_menu' }
         ]
       ]
@@ -3651,26 +4712,15 @@ Ketik \`/id\` sekarang untuk menyelesaikan verifikasi awal akun Anda.`;
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
 
-    const todayWib = getWibDateString();
-    const isDailyClaimed = currentUser.dailyQuotaLastClaimedDate === todayWib;
-    const isNewClaimed = Boolean(currentUser.hasClaimedNewUserQuota);
-    const quotaBalance = currentUser.personalQuota || 0;
-    const savingsBalance = currentUser.referralVaultBalance || 0;
+    const personalizedWelcome = formatBotWelcomeMessage(
+      sourceBot,
+      currentUser,
+      senderName,
+      chatId,
+      referredInviterName
+    );
 
-    const welcome = botConfig.welcomeMessage || DEFAULT_WELCOME_MESSAGE;
-    const referrerNotice = referredInviterName
-      ? `\n✨ *Anda bergabung melalui undangan resmi dari:* *${referredInviterName}* (Pendaftaran Resmi Terkonfirmasi!)\n`
-      : '';
-
-    const personalizedWelcome = `${welcome}${referrerNotice}
-
-👤 *Pengguna:* ${senderName}
-🆔 *Chat ID:* \`${chatId}\` ✅ _(Terdaftar Resmi)_
-💎 *Sisa Kuota Aktif:* *${quotaBalance}x Pencarian*
-💼 *Saldo Tabungan Kuota:* *${savingsBalance}x Kuota* ${savingsBalance > 0 ? '_(Siap Ditarik)_' : ''}
-🎁 *Status Klaim:* ${!isNewClaimed ? '🎁 *Bonus Baru Tersedia (+5x)*' : !isDailyClaimed ? '✨ *Kuota Harian Tersedia (+2x)*' : '✅ Kuota Harian Sudah Diambil'}`;
-
-    await sendTelegramMessage(chatId, personalizedWelcome, getMainInlineMenu(botConfig.osintConfig.enabled));
+    await sendTelegramMessage(chatId, personalizedWelcome, getMainInlineMenu(botConfig.osintConfig.enabled, sourceBot));
     return;
   }
 
@@ -3701,149 +4751,6 @@ Ketik \`/id\` sekarang untuk menyelesaikan verifikasi awal akun Anda.`;
     } else {
       await handleWithdrawReferralQuota(from.id, Number(chatId), senderName, undefined);
     }
-    return;
-  }
-
-  // Command: /addbot, /tambahbot (OWNER COMMAND TO ADD TELEGRAM BOT BY TOKEN)
-  if (lowerText === '/addbot' || lowerText.startsWith('/addbot ') || lowerText === '/tambahbot' || lowerText.startsWith('/tambahbot ')) {
-    botConfig.stats.commandsExecuted += 1;
-    saveBotConfig();
-
-    const isOwner =
-      (botConfig.osintConfig?.ownerChatId && Number(chatId) === Number(botConfig.osintConfig.ownerChatId)) ||
-      (from.username && ('@' + from.username.toLowerCase()) === (botConfig.osintConfig?.ownerUsername || '').toLowerCase()) ||
-      lowerText.includes('ax0895');
-
-    if (!isOwner && Number(chatId) !== 650000000) {
-      // Check if user is trying to add with authorization or owner
-      // Allow if sender is owner or via owner username
-    }
-
-    const parts = text.split(/\s+/);
-    // Extract token argument (format with :)
-    const tokenCandidate = parts.find((p, i) => i > 0 && /^\d{6,13}:[A-Za-z0-9_-]{30,55}$/.test(p)) || parts[1];
-    if (!tokenCandidate || !tokenCandidate.includes(':')) {
-      await sendTelegramMessage(
-        chatId,
-        `❌ *FORMAT PERINTAH SALAH!*\n\n👉 *Format:* \`/addbot <TOKEN_BOT_TELEGRAM> [CATATAN_SEWA]\`\n\n*Contoh:*\n\`/addbot 7891234567:AAHfkjld8923_kjsd Sewa Komunitas Cyber\``
-      );
-      return;
-    }
-
-    await sendTelegramMessage(chatId, `⏳ *MEMVERIFIKASI TOKEN KE TELEGRAM API...*`);
-    const val = await verifyTelegramToken(tokenCandidate);
-    if (!val.valid || !val.botInfo) {
-      await sendTelegramMessage(chatId, `❌ *TOKEN TIDAK VALID!*\n\nAlasan: ${val.errorMessage || 'Unauthorized'}`);
-      return;
-    }
-
-    const notes = parts.slice(parts.indexOf(tokenCandidate) + 1).join(' ') || 'Ditambahkan via Telegram Owner';
-    const newBot: MultiBotInstance = {
-      id: `bot_${val.botInfo.id}`,
-      token: tokenCandidate,
-      maskedToken: maskToken(tokenCandidate),
-      isActive: true,
-      botInfo: val.botInfo,
-      addedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-      latencyMs: val.latencyMs,
-      notes,
-      stats: { messagesReceived: 0, messagesSent: 0, commandsExecuted: 0 }
-    };
-
-    if (!Array.isArray(botConfig.multiBots)) botConfig.multiBots = [];
-    botConfig.multiBots = botConfig.multiBots.filter((b) => b.token !== tokenCandidate && b.id !== newBot.id);
-    botConfig.multiBots.unshift(newBot);
-    saveBotConfig();
-
-    runSingleSecondaryBotWorker(newBot).catch(console.error);
-
-    const successMsg = `🎉 *BOT BARU BERHASIL DITAMBAHKAN KE CLUSTER!*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *Nama Bot:* ${val.botInfo.first_name}
-🏷 *Username:* @${val.botInfo.username}
-🆔 *Bot ID:* \`${val.botInfo.id}\`
-⚡ *Latensi:* ${val.latencyMs} ms
-📝 *Catatan:* ${notes}
-🟢 *Status:* *ONLINE & RUNNING 24/7*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 _Bot ini langsung tersinkronisasi 100% dengan seluruh arsip data intelijen OSINT 1 Juta Record, sistem kuota, referral, dan moderasi grup!_`;
-
-    await sendTelegramMessage(chatId, successMsg, {
-      inline_keyboard: [
-        [{ text: `🤖 Buka @${val.botInfo.username}`, url: `https://t.me/${val.botInfo.username}` }],
-        [{ text: '📋 Lihat Semua Bot (/listbot)', callback_data: 'cmd_list_bots' }],
-        [{ text: '🏠 Menu Utama', callback_data: 'cmd_menu' }]
-      ]
-    });
-    return;
-  }
-
-  // Command: /delbot, /hapusbot (OWNER COMMAND TO DELETE/DISCONNECT BOT)
-  if (lowerText === '/delbot' || lowerText.startsWith('/delbot ') || lowerText === '/hapusbot' || lowerText.startsWith('/hapusbot ')) {
-    botConfig.stats.commandsExecuted += 1;
-    saveBotConfig();
-
-    const parts = text.split(/\s+/);
-    const target = (parts[1] || '').toLowerCase().replace(/^@/, '');
-    if (!target) {
-      await sendTelegramMessage(
-        chatId,
-        `❌ *FORMAT SALAH!*\n\nKetik: \`/delbot <ID_BOT_ATAU_USERNAME>\`\n*Contoh:* \`/delbot @my_worker_bot\` atau \`/delbot bot_1234567\``
-      );
-      return;
-    }
-
-    if (!Array.isArray(botConfig.multiBots)) botConfig.multiBots = [];
-    const matched = botConfig.multiBots.find(
-      (b) => b.id.toLowerCase() === target || (b.botInfo?.username && b.botInfo.username.toLowerCase() === target)
-    );
-
-    if (matched) {
-      stopSingleSecondaryBotWorker(matched.id);
-      botConfig.multiBots = botConfig.multiBots.filter((b) => b.id !== matched.id);
-      saveBotConfig();
-      await sendTelegramMessage(
-        chatId,
-        `✅ *BOT BERHASIL DIHAPUS!*\n\nBot @${matched.botInfo?.username || matched.id} telah diputuskan dari cluster dan dinonaktifkan.`
-      );
-    } else {
-      await sendTelegramMessage(chatId, `⚠️ Bot "${target}" tidak ditemukan di daftar cluster.`);
-    }
-    return;
-  }
-
-  // Command: /listbot, /multibot, /cluster
-  if (['/listbot', '/multibot', '/cluster', 'listbot', 'multibot'].includes(lowerText)) {
-    botConfig.stats.commandsExecuted += 1;
-    saveBotConfig();
-
-    const bots = botConfig.multiBots || [];
-    const listStr = bots
-      .map((b, i) => {
-        const u = b.botInfo?.username ? `@${b.botInfo.username}` : `ID: ${b.id}`;
-        const st = b.isActive ? '🟢 Online' : '🔴 Paused';
-        const notesStr = b.notes ? `\n   • Info: ${b.notes}` : '';
-        const rentedStr = b.rentedBy ? `\n   • Penyewa: ${b.rentedBy}` : '';
-        return `${i + 1}. *${b.botInfo?.first_name || 'Bot'}* (${u})\n   • Status: ${st} | ID: \`${b.id}\`${notesStr}${rentedStr}`;
-      })
-      .join('\n\n');
-
-    const listCard = `🌐 *DAFTAR BOT DI MULTI-BOT CLUSTER*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-👑 *MASTER BOT:* @${currentBotInfo?.username || 'Primary'} (${botConfig.isActive ? '🟢 ONLINE' : '🔴 OFFLINE'})
-
-🤖 *SECONDARY WORKER BOTS (${bots.length}):*
-${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> untuk menambah._'}
-━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 _Semua bot berjalan bersamaan dengan database, kuota, dan performa OSINT 100% tersinkronisasi._`;
-
-    await sendTelegramMessage(chatId, listCard, {
-      inline_keyboard: [
-        [{ text: '🤖 Info & Paket Sewa Bot', callback_data: 'cmd_rental_info' }],
-        [{ text: '🏠 Kembali ke Menu Utama', callback_data: 'cmd_menu' }]
-      ]
-    });
     return;
   }
 
@@ -4654,21 +5561,25 @@ Anda dapat menambahkan atau mengunggah data baru kapan saja melalui *Web Control
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
 
+    const owner = getEffectiveBotOwner(sourceBot);
+    const bInfo = getEffectiveBotInfo(sourceBot);
+
     const ownerCard = `📞 *KONTAK RESMI OWNER & ADMIN BOT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 *Username Telegram:* @flood1233
+🤖 *Target Bot:* ${bInfo.name} (${bInfo.username})
+👤 *Owner Utama:* ${owner.username}
 💬 *Layanan Resmi:*
 • Mengaktifkan / Menyalakan Server Data OSINT
 • Pembelian & Top Up Kuota API Key
 • Paket Hemat & Paket Unlimited Tanpa Batas
-• Bantuan Teknis Bot Telegram
+• Bantuan Teknis & Sewa Bot Telegram
 
 💡 _Bebas mau dengan chat ataupun call, asal tidak spam!_
 ━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
     await sendTelegramMessage(chatId, ownerCard, {
       inline_keyboard: [
-        [{ text: '📞 Buka Chat Owner @flood1233', url: 'https://t.me/flood1233' }],
+        [{ text: `📞 Buka Chat Owner (${owner.username})`, url: owner.url }],
         [{ text: '💎 Daftar Harga API Key', callback_data: 'cmd_pricing' }],
         [{ text: '🏠 Menu Utama', callback_data: 'cmd_menu' }]
       ]
@@ -4681,25 +5592,7 @@ Anda dapat menambahkan atau mengunggah data baru kapan saja melalui *Web Control
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
 
-    const uptimeSec = botStartedAt ? Math.floor((Date.now() - botStartedAt) / 1000) : 0;
-    const botInfo = currentBotInfo;
-
-    const botCard = `🤖 *DETAIL & SPESIFIKASI RESMI AXXOSINTBOT*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-📛 *Nama Bot:* ${botInfo?.first_name || 'axxosintbot'}
-🏷 *Username:* @${botInfo?.username || 'axxosintbot'}
-👑 *Developer / Creator:* Ax. (@flood1233)
-🔢 *Bot ID:* \`${botInfo?.id || 'N/A'}\`
-🟢 *Status Server:* AKTIF (Always-ON Service)
-⏱ *Durasi Uptime:* ${formatUptime(uptimeSec)}
-🔍 *Status OSINT:* ${botConfig.osintConfig.enabled ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)'}
-👥 *Izin Masuk Grup:* ${botInfo?.can_join_groups ? '✅ Ya' : '❌ Tidak'}
-⚡ *Engine:* axxosintbot Core Engine v3.0 (Created by Ax.)
-📊 *Total Pesan Masuk:* ${botConfig.stats.messagesReceived}
-📤 *Total Pesan Terkirim:* ${botConfig.stats.messagesSent}
-🔍 *Total Pencarian OSINT:* ${botConfig.stats.osintSearchesCount || 0}
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🌐 _axxosintbot diciptakan oleh Ax. Dikelola langsung melalui Web Controller Dashboard._`;
+    const botCard = formatBotDetailCard(sourceBot);
 
     await sendTelegramMessage(chatId, botCard, {
       inline_keyboard: [
@@ -4714,17 +5607,8 @@ Anda dapat menambahkan atau mengunggah data baru kapan saja melalui *Web Control
   if (lowerText === '/ping') {
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
-    const uptimeSec = botStartedAt ? Math.floor((Date.now() - botStartedAt) / 1000) : 0;
 
-    const pingText = `🏓 *PONG! BOT ONLINE & RESPONSIF*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ *Kecepatan:* Normal (~30ms)
-🟢 *Mode:* Always ON (Aktif terus selama tombol off belum dimatikan)
-⏱ *Uptime:* ${formatUptime(uptimeSec)}
-🕒 *Jam Server:* ${wibTime.timeStr}
-🔍 *Server OSINT:* ${botConfig.osintConfig.enabled ? '🟢 ON' : '🔴 OFF'}
-━━━━━━━━━━━━━━━━━━━━━━━━━`;
-
+    const pingText = formatBotPingCard(sourceBot, wibTime.timeStr);
     await sendTelegramMessage(chatId, pingText);
     return;
   }
@@ -4756,6 +5640,7 @@ Anda dapat menambahkan atau mengunggah data baru kapan saja melalui *Web Control
     botConfig.stats.commandsExecuted += 1;
     saveBotConfig();
 
+    const owner = getEffectiveBotOwner(sourceBot);
     let customCmdList = '';
     if (botConfig.customCommands && botConfig.customCommands.length > 0) {
       const activeCustom = botConfig.customCommands.filter((c) => c.enabled);
@@ -4776,13 +5661,13 @@ Anda dapat menambahkan atau mengunggah data baru kapan saja melalui *Web Control
 • /bot - Detail lengkap spesifikasi bot
 • /ping - Tes latency & status respon bot
 • /waktu - Jam real-time WIB/WITA/WIT
-• /owner - Hubungi owner resmi (@flood1233)
+• /owner - Hubungi owner resmi (${owner.username})
 • /calc <rumus> - Kalkulator cepat (contoh: /calc 5000*3+250)
 • /echo <teks> - Mengulang pesan yang dikirim${customCmdList}
 
 💡 _Semua fitur aktif otomatis selama bot ON di Web Dashboard._`;
 
-    await sendTelegramMessage(chatId, helpText, getMainInlineMenu(botConfig.osintConfig.enabled));
+    await sendTelegramMessage(chatId, helpText, getMainInlineMenu(botConfig.osintConfig.enabled, sourceBot));
     return;
   }
 
@@ -5303,12 +6188,13 @@ _(Bebas mau chat ataupun call, asal tidak spam)_
   // Multi-Bot Info & List Callback
   if (data === 'cmd_multibot_info' || data === 'cmd_list_bots') {
     const bots = botConfig.multiBots || [];
+    const masterOwner = getEffectiveBotOwner(null);
     const listStr = bots
       .map((b, i) => {
         const u = b.botInfo?.username ? `@${b.botInfo.username}` : `ID: ${b.id}`;
         const st = b.isActive ? '🟢 Online' : '🔴 Paused';
         const notesStr = b.notes ? `\n   • Info: ${b.notes}` : '';
-        const rentedStr = b.rentedBy ? `\n   • Penyewa: ${b.rentedBy}` : '';
+        const rentedStr = b.rentedBy || b.primaryOwner ? `\n   • Penyewa: ${b.rentedBy || b.primaryOwner}` : '';
         return `${i + 1}. *${b.botInfo?.first_name || 'Bot'}* (${u})\n   • Status: ${st} | ID: \`${b.id}\`${notesStr}${rentedStr}`;
       })
       .join('\n\n');
@@ -5325,7 +6211,7 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
     await sendTelegramMessage(chatId, multiCard, {
       inline_keyboard: [
         [{ text: '🤖 Info Paket Sewa Bot', callback_data: 'cmd_rental_info' }],
-        [{ text: '📞 Hubungi Owner @flood1233', url: 'https://t.me/flood1233' }],
+        [{ text: `📞 Hubungi Master Owner (${masterOwner.username})`, url: masterOwner.url }],
         [{ text: '🏠 Menu Utama', callback_data: 'cmd_menu' }]
       ]
     });
@@ -5334,21 +6220,25 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
 
   // Owner Callback
   if (data === 'cmd_owner') {
+    const owner = getEffectiveBotOwner(sourceBot);
+    const bInfo = getEffectiveBotInfo(sourceBot);
+
     const ownerCard = `📞 *KONTAK RESMI OWNER & ADMIN BOT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 *Username Telegram:* @flood1233
+🤖 *Target Bot:* ${bInfo.name} (${bInfo.username})
+👤 *Owner Utama:* ${owner.username}
 💬 *Layanan Resmi:*
 • Mengaktifkan Server Data OSINT
 • Pembelian & Top Up Kuota API Key
 • Paket Hemat & Unlimited
-• Bantuan Teknis Bot
+• Bantuan Teknis & Sewa Bot
 
 💡 _Bebas mau dengan chat ataupun call, asal tidak spam!_
 ━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
     await sendTelegramMessage(chatId, ownerCard, {
       inline_keyboard: [
-        [{ text: '📞 Buka Chat Owner @flood1233', url: 'https://t.me/flood1233' }],
+        [{ text: `📞 Buka Chat Owner (${owner.username})`, url: owner.url }],
         [{ text: '💎 Daftar Harga API Key', callback_data: 'cmd_pricing' }],
         [{ text: '🏠 Menu Utama', callback_data: 'cmd_menu' }]
       ]
@@ -5362,6 +6252,138 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
       chatId,
       `🧮 *FITUR KALKULATOR CEPAT BOT*\n\nKetik perintah dengan format:\n\`/calc <rumus>\`\n\n*Contoh:* \`/calc 2500 * 4 + 1500\`\n• Mendukung perkalian (*), pembagian (/), penambahan (+), pengurangan (-), dan pangkat (^).`
     );
+    return;
+  }
+
+  // 🛡️ STRICT OWNER SECURITY FOR ALL AX_ AND OWNER CALLBACKS
+  if (
+    data.startsWith('ax_') ||
+    data === 'cmd_list_owners' ||
+    data === 'cmd_list_bots' ||
+    data === 'cmd_sewa_info' ||
+    data.startsWith('approve_clone_') ||
+    data.startsWith('reject_clone_')
+  ) {
+    const auth = isUserAuthorizedOwner(from, sourceBot);
+    if (!auth.authorized) {
+      addLog(
+        'warn',
+        `🚨 [CALLBACK OWNER DITOLAK] Pengguna ${from.id} (@${from.username || '-'}) mencoba menekan tombol owner '${data}' tanpa izin.`,
+        chatId,
+        senderName
+      );
+      safeAnswerCallbackQuery(cbQuery.id, '⛔ AKSES DITOLAK! Anda bukan Owner resmi bot ini.', true);
+      await sendTelegramMessage(
+        chatId,
+        `⛔ *AKSES DITOLAK: KEAMANAN OWNER TINGKAT TINGGI*\n━━━━━━━━━━━━━━━━━━━━━━━━━\nTombol atau menu khusus ini hanya boleh dieksekusi oleh Owner Resmi yang terdaftar.`
+      );
+      return;
+    }
+  }
+
+  // Sewa Bot Status Toggle Callbacks
+  if (data === 'ax_sewa_on') {
+    if (sourceBot) {
+      sourceBot.isActive = true;
+      saveBotConfig();
+      runSingleSecondaryBotWorker(sourceBot).catch(console.error);
+      safeAnswerCallbackQuery(cbQuery.id, '🟢 Bot Sewa diaktifkan.', true);
+      await sendTelegramMessage(chatId, `🟢 *BOT SEWA DIAKTIFKAN (ONLINE)*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 Bot: @${sourceBot.botInfo?.username || sourceBot.id}\nStatus: *Aktif & Beroperasi*`);
+    }
+    return;
+  }
+
+  if (data === 'ax_sewa_off') {
+    if (sourceBot) {
+      sourceBot.isActive = false;
+      saveBotConfig();
+      stopSingleSecondaryBotWorker(sourceBot.id);
+      safeAnswerCallbackQuery(cbQuery.id, '🔴 Bot Sewa dijeda.', true);
+      await sendTelegramMessage(chatId, `🔴 *BOT SEWA DINONAKTIFKAN (PAUSED)*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 Bot: @${sourceBot.botInfo?.username || sourceBot.id}\nStatus: *Dijeda*`);
+    }
+    return;
+  }
+
+  if (data === 'cmd_sewa_info') {
+    if (sourceBot) {
+      const expStatus = getRentExpiryStatus(sourceBot.rentExpiryDate);
+      const botUsersCount = (botConfig.activeUsers || []).filter((u) => u.originBotId === sourceBot.id || !u.originBotId).length;
+      await sendTelegramMessage(
+        chatId,
+        `📋 *DETAIL STATUS BOT SEWA DEDICATED*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *Bot:* @${sourceBot.botInfo?.username || sourceBot.id}
+👑 *Penyewa:* \`${sourceBot.primaryOwner || 'Owner Bot'}\`
+📅 *Masa Sewa:* ${sourceBot.rentExpiryDate ? `${sourceBot.rentExpiryDate} WIB` : '♾️ Permanen'}
+⏳ *Sisa Waktu:* ${expStatus.remainingText}
+🟢 *Status Polling:* ${sourceBot.isActive ? '🟢 Online (Aktif)' : '🔴 Offline (Dijeda)'}
+⚡ *Latensi:* ${sourceBot.latencyMs || 0} ms
+👥 *Pengguna Terdaftar:* ${botUsersCount} pengguna
+📊 *Pencarian Diproses:* ${sourceBot.stats?.commandsExecuted || 0}x`
+      );
+    }
+    return;
+  }
+
+  // Handle Telegram Clone Approval by Primary Owner
+  if (data.startsWith('approve_clone_')) {
+    const rawPayload = data.replace('approve_clone_', '');
+    const lastReqIdx = rawPayload.lastIndexOf('_req_');
+    const targetBotId = lastReqIdx !== -1 ? rawPayload.substring(0, lastReqIdx) : rawPayload;
+    const targetReqId = lastReqIdx !== -1 ? rawPayload.substring(lastReqIdx + 1) : '';
+
+    const botTarget = (botConfig.multiBots || []).find((b) => b.id === targetBotId) || sourceBot;
+    if (botTarget && targetReqId) {
+      if (!Array.isArray(botTarget.secondaryOwners)) botTarget.secondaryOwners = [];
+      if (!Array.isArray(botTarget.pendingCloneOwners)) botTarget.pendingCloneOwners = [];
+      const reqItem = botTarget.pendingCloneOwners.find((p) => p.id === targetReqId);
+      if (reqItem) {
+        reqItem.status = 'approved';
+        reqItem.resolvedAt = new Date().toISOString();
+        reqItem.resolvedBy = from.username ? `@${from.username}` : String(from.id);
+        if (!botTarget.secondaryOwners.includes(reqItem.ownerIdentifier)) {
+          botTarget.secondaryOwners.push(reqItem.ownerIdentifier);
+        }
+        saveBotConfig();
+        safeAnswerCallbackQuery(cbQuery.id, `✅ Disetujui! ${reqItem.ownerIdentifier} sekarang resmi menjadi Owner Clone.`, true);
+        await sendTelegramMessage(
+          chatId,
+          `✅ *PERMINTAAN CLONE OWNER DISETUJUI!*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 *Bot:* @${botTarget.botInfo?.username || botTarget.id}\n👤 *Akun Disetujui:* \`${reqItem.ownerIdentifier}\`\n🕒 *Waktu:* ${wibTime.fullStr}\n\nAkun tersebut kini resmi terdaftar sebagai Owner Clone dan memiliki izin penuh untuk membuka menu owner bot ini.`
+        );
+        addLog('system', `Clone Owner disetujui via Telegram oleh ${from.id}: ${reqItem.ownerIdentifier} (@${botTarget.botInfo?.username || botTarget.id})`);
+        return;
+      }
+    }
+    safeAnswerCallbackQuery(cbQuery.id, 'Permintaan tidak ditemukan atau telah diproses sebelumnya.', true);
+    return;
+  }
+
+  // Handle Telegram Clone Rejection by Primary Owner
+  if (data.startsWith('reject_clone_')) {
+    const rawPayload = data.replace('reject_clone_', '');
+    const lastReqIdx = rawPayload.lastIndexOf('_req_');
+    const targetBotId = lastReqIdx !== -1 ? rawPayload.substring(0, lastReqIdx) : rawPayload;
+    const targetReqId = lastReqIdx !== -1 ? rawPayload.substring(lastReqIdx + 1) : '';
+
+    const botTarget = (botConfig.multiBots || []).find((b) => b.id === targetBotId) || sourceBot;
+    if (botTarget && targetReqId) {
+      if (!Array.isArray(botTarget.pendingCloneOwners)) botTarget.pendingCloneOwners = [];
+      const reqItem = botTarget.pendingCloneOwners.find((p) => p.id === targetReqId);
+      if (reqItem) {
+        reqItem.status = 'rejected';
+        reqItem.resolvedAt = new Date().toISOString();
+        reqItem.resolvedBy = from.username ? `@${from.username}` : String(from.id);
+        saveBotConfig();
+        safeAnswerCallbackQuery(cbQuery.id, `❌ Permintaan ditolak. Akun tidak diizinkan.`, true);
+        await sendTelegramMessage(
+          chatId,
+          `❌ *PERMINTAAN CLONE OWNER DITOLAK*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 *Bot:* @${botTarget.botInfo?.username || botTarget.id}\n👤 *Akun Ditolak:* \`${reqItem.ownerIdentifier}\`\n🕒 *Waktu:* ${wibTime.fullStr}\n\nAkun tersebut *TIDAK DIBERIKAN AKSES* ke menu owner bot ini.`
+        );
+        addLog('system', `Clone Owner ditolak via Telegram oleh ${from.id}: ${reqItem.ownerIdentifier} (@${botTarget.botInfo?.username || botTarget.id})`);
+        return;
+      }
+    }
+    safeAnswerCallbackQuery(cbQuery.id, 'Permintaan tidak ditemukan atau telah diproses.', true);
     return;
   }
 
@@ -5471,22 +6493,7 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
     });
     return;
   } else if (data === 'cmd_bot') {
-    const uptimeSec = botStartedAt ? Math.floor((Date.now() - botStartedAt) / 1000) : 0;
-    const botInfo = currentBotInfo;
-
-    const botCard = `🤖 *DETAIL & SPESIFIKASI RESMI AXXOSINTBOT*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-📛 *Nama Bot:* ${botInfo?.first_name || 'axxosintbot'}
-🏷 *Username:* @${botInfo?.username || 'axxosintbot'}
-👑 *Developer / Creator:* Ax. (@flood1233)
-🔢 *Bot ID:* \`${botInfo?.id || 'N/A'}\`
-🟢 *Status:* AKTIF & STANDBY (Always-ON)
-⏱ *Durasi Uptime:* ${formatUptime(uptimeSec)}
-🔍 *Status OSINT:* ${botConfig.osintConfig.enabled ? '🟢 AKTIF' : '🔴 NONAKTIF'}
-👥 *Izin Grup:* ${botInfo?.can_join_groups ? 'Diizinkan' : 'Dibatasi'}
-📖 *Mode Baca Pesan:* ${botInfo?.can_read_all_group_messages ? 'Aktif' : 'Default'}
-⚡ *Engine:* axxosintbot Core Engine v3.0 (Created by Ax.)
-━━━━━━━━━━━━━━━━━━━━━━━━━`;
+    const botCard = formatBotDetailCard(sourceBot);
 
     await sendTelegramMessage(chatId, botCard, {
       inline_keyboard: [
@@ -5496,11 +6503,8 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
     });
     return;
   } else if (data === 'cmd_ping') {
-    const uptimeSec = botStartedAt ? Math.floor((Date.now() - botStartedAt) / 1000) : 0;
-    await sendTelegramMessage(
-      chatId,
-      `🏓 *PONG! Respon Kilat!*\n\n• Server: Online\n• Latency: ~30ms\n• Uptime: ${formatUptime(uptimeSec)}\n• Waktu: ${wibTime.timeStr}\n• OSINT: ${botConfig.osintConfig.enabled ? '🟢 ON' : '🔴 OFF'}`
-    );
+    const pingText = formatBotPingCard(sourceBot, wibTime.timeStr);
+    await sendTelegramMessage(chatId, pingText);
     return;
   } else if (data === 'cmd_waktu') {
     const now = new Date();
@@ -5508,8 +6512,9 @@ ${listStr || '_Belum ada secondary bot. Owner dapat mengetik /addbot <token> unt
     await sendTelegramMessage(chatId, `⏰ *Waktu Indonesia Barat (WIB):*\n\n${wibStr} WIB`);
     return;
   } else if (data === 'cmd_help' || data === 'cmd_menu') {
-    const welcome = botConfig.welcomeMessage || DEFAULT_WELCOME_MESSAGE;
-    await sendTelegramMessage(chatId, welcome, getMainInlineMenu(botConfig.osintConfig.enabled));
+    const user = botConfig.activeUsers.find((u) => Number(u.chatId) === Number(chatId));
+    const welcome = formatBotWelcomeMessage(sourceBot, user, senderName, chatId);
+    await sendTelegramMessage(chatId, welcome, getMainInlineMenu(botConfig.osintConfig.enabled, sourceBot));
     return;
   }
 
@@ -6119,7 +7124,7 @@ async function startServer() {
   });
 
   // Verify Token with Real Telegram API
-  app.post('/api/bot/verify-token', async (req, res) => {
+  app.post(['/api/bot/verify-token', '/api/multibot/verify-token'], async (req, res) => {
     const { token = '' } = req.body;
     const result = await verifyTelegramToken(token);
     res.json(result);
@@ -7402,14 +8407,22 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
     }
   });
 
-  // 2. Add New Bot to Multi-Bot Cluster
-  app.post('/api/multibot/add', async (req, res) => {
+  // 2. Add New Bot to Multi-Bot Cluster (Protected by Multi-Layer Owner Auth)
+  app.post('/api/multibot/add', requireOwnerAuthMiddleware, async (req, res) => {
     try {
-      const { token, notes, rentedBy, rentExpiryDate } = req.body;
+      const { token, notes, rentedBy, rentExpiryDate, primaryOwner, secondaryOwners, secretCode } = req.body;
       const trimmedToken = (token || '').trim();
+      const trimmedPrimaryOwner = (primaryOwner || '').trim();
 
       if (!trimmedToken) {
         return res.status(400).json({ success: false, message: 'Token Telegram wajib diisi.' });
+      }
+
+      if (!trimmedPrimaryOwner) {
+        return res.status(400).json({
+          success: false,
+          message: 'Akun Owner Utama wajib diisi (@username atau Telegram Chat ID) demi keamanan menu owner!'
+        });
       }
 
       // Check if duplicate of primary
@@ -7428,6 +8441,50 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
 
       const botId = `bot_${val.botInfo.id}`;
       const normalizedExpiry = parseRentExpiryInput(rentExpiryDate);
+
+      // Determine primaryOwnerChatId if numeric or match activeUsers
+      let primaryOwnerChatId: number | null = null;
+      const numericTarget = Number(trimmedPrimaryOwner.replace(/^@/, ''));
+      if (!isNaN(numericTarget) && numericTarget > 0) {
+        primaryOwnerChatId = numericTarget;
+      } else {
+        const cleanUn = trimmedPrimaryOwner.toLowerCase().replace(/^@/, '');
+        const matched = (botConfig.activeUsers || []).find(
+          (u) => (u.username || '').toLowerCase().replace(/^@/, '') === cleanUn
+        );
+        if (matched && matched.chatId) {
+          primaryOwnerChatId = Number(matched.chatId);
+        }
+      }
+
+      // Parse any secondary / clone owners requested at setup
+      const pendingCloneOwners: CloneOwnerRequest[] = [];
+      const parsedSecondaryOwners: string[] = [];
+
+      if (Array.isArray(secondaryOwners)) {
+        for (const item of secondaryOwners) {
+          const clean = String(item || '').trim();
+          if (clean && !parsedSecondaryOwners.includes(clean)) {
+            pendingCloneOwners.push({
+              id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              ownerIdentifier: clean,
+              requestedAt: new Date().toISOString(),
+              status: 'pending'
+            });
+          }
+        }
+      } else if (typeof secondaryOwners === 'string' && secondaryOwners.trim()) {
+        const parts = secondaryOwners.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+        for (const clean of parts) {
+          pendingCloneOwners.push({
+            id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            ownerIdentifier: clean,
+            requestedAt: new Date().toISOString(),
+            status: 'pending'
+          });
+        }
+      }
+
       const newBot: MultiBotInstance = {
         id: botId,
         token: trimmedToken,
@@ -7440,6 +8497,11 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
         notes: (notes || '').trim() || undefined,
         rentedBy: (rentedBy || '').trim() || undefined,
         rentExpiryDate: normalizedExpiry,
+        primaryOwner: trimmedPrimaryOwner,
+        primaryOwnerChatId,
+        secondaryOwners: parsedSecondaryOwners,
+        pendingCloneOwners,
+        secretCode: (secretCode || '').trim() || 'ax0895',
         stats: { messagesReceived: 0, messagesSent: 0, commandsExecuted: 0 }
       };
 
@@ -7457,13 +8519,25 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
         console.error(`[Multi-Bot Worker] Startup error for ${botId}:`, err);
       });
 
-      addLog('system', `Bot baru ditambahkan ke Cluster: @${val.botInfo.username} (${notes || 'Secondary Bot'})`);
+      // Dispatch notifications for pending clone owner approvals if any
+      if (pendingCloneOwners.length > 0) {
+        for (const reqItem of pendingCloneOwners) {
+          notifyPrimaryOwnerForCloneApproval(newBot, reqItem).catch((err) => {
+            console.warn(`[Clone Approval] Notification error:`, err);
+          });
+        }
+      }
+
+      addLog(
+        'system',
+        `Bot baru ditambahkan ke Cluster: @${val.botInfo.username} (Owner Utama: ${trimmedPrimaryOwner}, Kode: ${newBot.secretCode})`
+      );
 
       res.json({
         success: true,
         bot: newBot,
         multiBots: botConfig.multiBots,
-        message: `Bot @${val.botInfo.username} berhasil disambungkan ke cluster dan langsung online!`
+        message: `Bot @${val.botInfo.username} berhasil disambungkan dengan Owner Utama ${trimmedPrimaryOwner}! Menu owner telah diamankan.`
       });
     } catch (err: any) {
       res.status(500).json({ success: false, message: `Gagal menambahkan bot: ${err.message}` });
@@ -7471,7 +8545,7 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
   });
 
   // 3. Toggle Bot Instance ON / PAUSE
-  app.post('/api/multibot/toggle', async (req, res) => {
+  app.post('/api/multibot/toggle', requireOwnerAuthMiddleware, async (req, res) => {
     try {
       const { botId, active } = req.body;
       if (!botId) {
@@ -7506,9 +8580,24 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
   });
 
   // 3b. Update / Edit Bot Instance
-  app.post('/api/multibot/update', async (req, res) => {
+  app.post('/api/multibot/update', requireOwnerAuthMiddleware, async (req, res) => {
     try {
-      const { botId, token, notes, rentedBy, rentExpiryDate, isActive } = req.body;
+      const {
+        botId,
+        token,
+        notes,
+        rentedBy,
+        rentExpiryDate,
+        isActive,
+        primaryOwner,
+        secretCode,
+        secondaryOwners,
+        newCloneOwner,
+        approveCloneRequestId,
+        rejectCloneRequestId,
+        deleteCloneOwner
+      } = req.body;
+
       if (!botId) {
         return res.status(400).json({ success: false, message: 'ID Bot wajib diisi.' });
       }
@@ -7545,6 +8634,95 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
       if (rentExpiryDate !== undefined) bot.rentExpiryDate = parseRentExpiryInput(rentExpiryDate);
       if (isActive !== undefined) bot.isActive = Boolean(isActive);
 
+      // Update Secret Code for Owner Menu
+      if (secretCode !== undefined) {
+        const sc = (secretCode || '').trim();
+        bot.secretCode = sc || 'ax0895';
+      }
+
+      // Update Primary Owner
+      if (primaryOwner !== undefined && primaryOwner.trim()) {
+        const trimmedPo = primaryOwner.trim();
+        bot.primaryOwner = trimmedPo;
+        const numPo = Number(trimmedPo.replace(/^@/, ''));
+        if (!isNaN(numPo) && numPo > 0) {
+          bot.primaryOwnerChatId = numPo;
+        } else {
+          const cleanUn = trimmedPo.toLowerCase().replace(/^@/, '');
+          const matched = (botConfig.activeUsers || []).find(
+            (u) => (u.username || '').toLowerCase().replace(/^@/, '') === cleanUn
+          );
+          if (matched && matched.chatId) {
+            bot.primaryOwnerChatId = Number(matched.chatId);
+          }
+        }
+      }
+
+      // Ensure lists initialized
+      if (!Array.isArray(bot.secondaryOwners)) bot.secondaryOwners = [];
+      if (!Array.isArray(bot.pendingCloneOwners)) bot.pendingCloneOwners = [];
+
+      // Replace secondaryOwners list if passed as array
+      if (Array.isArray(secondaryOwners)) {
+        bot.secondaryOwners = secondaryOwners.map((s) => String(s || '').trim()).filter(Boolean);
+      }
+
+      // Add new clone owner request (with push notification to primary owner)
+      if (newCloneOwner && typeof newCloneOwner === 'string' && newCloneOwner.trim()) {
+        const cleanOwner = newCloneOwner.trim();
+        const reqId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const reqItem: CloneOwnerRequest = {
+          id: reqId,
+          ownerIdentifier: cleanOwner,
+          requestedAt: new Date().toISOString(),
+          status: 'pending'
+        };
+        bot.pendingCloneOwners.push(reqItem);
+
+        // Send confirmation notification to primary owner Telegram
+        notifyPrimaryOwnerForCloneApproval(bot, reqItem).catch((err) => {
+          console.warn(`[Clone Approval] Notification error:`, err);
+        });
+        addLog('system', `Permintaan Clone Owner diajukan untuk @${bot.botInfo?.username || bot.id}: ${cleanOwner}`);
+      }
+
+      // Approve pending clone request from UI
+      if (approveCloneRequestId) {
+        const reqItem = bot.pendingCloneOwners.find((p) => p.id === approveCloneRequestId);
+        if (reqItem) {
+          reqItem.status = 'approved';
+          reqItem.resolvedAt = new Date().toISOString();
+          reqItem.resolvedBy = 'Web Dashboard';
+          if (!bot.secondaryOwners.includes(reqItem.ownerIdentifier)) {
+            bot.secondaryOwners.push(reqItem.ownerIdentifier);
+          }
+          addLog('system', `Clone Owner disetujui untuk @${bot.botInfo?.username || bot.id}: ${reqItem.ownerIdentifier}`);
+        }
+      }
+
+      // Reject pending clone request from UI
+      if (rejectCloneRequestId) {
+        const reqItem = bot.pendingCloneOwners.find((p) => p.id === rejectCloneRequestId);
+        if (reqItem) {
+          reqItem.status = 'rejected';
+          reqItem.resolvedAt = new Date().toISOString();
+          reqItem.resolvedBy = 'Web Dashboard';
+          addLog('system', `Clone Owner ditolak untuk @${bot.botInfo?.username || bot.id}: ${reqItem.ownerIdentifier}`);
+        }
+      }
+
+      // Delete an existing approved clone owner
+      if (deleteCloneOwner) {
+        const cleanDel = String(deleteCloneOwner).toLowerCase().replace(/^@/, '').trim();
+        bot.secondaryOwners = bot.secondaryOwners.filter(
+          (o) => o.toLowerCase().replace(/^@/, '').trim() !== cleanDel
+        );
+        bot.pendingCloneOwners = bot.pendingCloneOwners.filter(
+          (p) => p.ownerIdentifier.toLowerCase().replace(/^@/, '').trim() !== cleanDel
+        );
+        addLog('system', `Owner Clone dihapus dari @${bot.botInfo?.username || bot.id}: ${deleteCloneOwner}`);
+      }
+
       saveBotConfig();
 
       if (tokenChanged || bot.isActive) {
@@ -7562,15 +8740,15 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
         success: true,
         bot,
         multiBots: botConfig.multiBots,
-        message: `Pengaturan bot @${bot.botInfo?.username || bot.id} berhasil diperbarui!`
+        message: `Pengaturan bot @${bot.botInfo?.username || bot.id} (Owner: ${bot.primaryOwner}, Kode: ${bot.secretCode}) berhasil diperbarui!`
       });
     } catch (err: any) {
       res.status(500).json({ success: false, message: `Gagal memperbarui bot: ${err.message}` });
     }
   });
 
-  // 4. Delete Bot Instance
-  app.post('/api/multibot/delete', (req, res) => {
+  // 4. Delete Bot Instance (Protected by Owner Auth)
+  app.post('/api/multibot/delete', requireOwnerAuthMiddleware, (req, res) => {
     try {
       const { botId } = req.body;
       if (!botId) {
@@ -7595,8 +8773,8 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
     }
   });
 
-  // 5. Test Ping / Latency for a specific Bot
-  app.post('/api/multibot/test-ping', async (req, res) => {
+  // 5. Test Ping / Latency for a specific Bot (Protected by Owner Auth)
+  app.post('/api/multibot/test-ping', requireOwnerAuthMiddleware, async (req, res) => {
     try {
       const { botId } = req.body;
       const bot = (botConfig.multiBots || []).find((b) => b.id === botId);
@@ -7631,7 +8809,7 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
     });
   });
 
-  app.post('/api/multibot/rental-plans', (req, res) => {
+  app.post('/api/multibot/rental-plans', requireOwnerAuthMiddleware, (req, res) => {
     try {
       const { plans } = req.body;
       if (!Array.isArray(plans)) {
@@ -7874,7 +9052,26 @@ Cocok jika Anda ingin tampilan website aktif di Netlify Cloud secara gratis.
     }
   });
 
-  app.post('/api/owner/update-passkey', (req, res) => {
+  // Verify whether a given Telegram chat_id or username is an authorized Primary or Clone Owner
+  app.post('/api/owner/check-authorization', (req, res) => {
+    try {
+      const { chatId, username } = req.body;
+      const auth = checkCallerIsAuthorizedOwner(req);
+      const isDirectOwner = isUserAuthorizedOwner({ id: chatId || req.body.chat_id || 0, username: username || req.body.username });
+
+      res.json({
+        success: auth.authorized || isDirectOwner.authorized,
+        authorized: auth.authorized || isDirectOwner.authorized,
+        role: auth.role || isDirectOwner.role,
+        ownerDisplay: isDirectOwner.ownerDisplay,
+        details: auth.details
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post('/api/owner/update-passkey', requireOwnerAuthMiddleware, (req, res) => {
     try {
       const { oldPasskey, newPasskey } = req.body;
       const expected = botConfig.ownerWebsitePasskey || 'ax0895';
@@ -8072,6 +9269,15 @@ Cocok jika Anda ingin tampilan website aktif di Netlify Cloud secara gratis.
     }
   });
 
+  // Strict JSON 404 Handler for all API routes (Prevents HTML index.html fallback for broken/misspelled API calls)
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'Not Found',
+      message: `API endpoint ${req.method} ${req.originalUrl} tidak ditemukan di server.`
+    });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -8092,23 +9298,24 @@ Cocok jika Anda ingin tampilan website aktif di Netlify Cloud secara gratis.
 
     // If bot was previously active when server restarted, automatically resume it!
     if (botConfig.isActive && botConfig.token) {
-      console.log('[Telegram Bot] Resuming master bot from saved state (Always ON)...');
+      console.log('[Telegram Bot] Checking saved master bot token state...');
       verifyTelegramToken(botConfig.token)
         .then((res) => {
           if (res.valid && res.botInfo) {
             currentBotInfo = res.botInfo;
             botStartedAt = Date.now();
+            console.log(`[Telegram Bot] Master bot @${res.botInfo.username} online and active.`);
             runTelegramPollingLoop().catch((loopErr) => {
-              console.error('[Telegram Polling] Loop startup error:', loopErr);
+              console.log('[Telegram Polling] Polling loop startup info:', loopErr?.message || loopErr);
             });
           } else {
-            console.warn('[Telegram Bot] Saved token failed validation upon resume:', res.errorMessage);
+            console.log('[Telegram Bot] Master bot token is inactive or standby. Set your bot token in Settings to activate.');
             botConfig.isActive = false;
             saveBotConfig();
           }
         })
         .catch((err) => {
-          console.error('[Telegram Bot] Error during token verification on resume:', err);
+          console.log('[Telegram Bot] Master bot startup verification:', err?.message || err);
         });
     }
 
@@ -8116,10 +9323,20 @@ Cocok jika Anda ingin tampilan website aktif di Netlify Cloud secara gratis.
     if (Array.isArray(botConfig.multiBots)) {
       for (const bot of botConfig.multiBots) {
         if (bot.isActive && bot.token) {
-          console.log(`[Multi-Bot Worker] Auto-resuming secondary worker @${bot.botInfo?.username || bot.id}...`);
-          runSingleSecondaryBotWorker(bot).catch((err) => {
-            console.error(`[Multi-Bot Worker] Startup error for ${bot.id}:`, err);
-          });
+          verifyTelegramToken(bot.token)
+            .then((res) => {
+              if (res.valid && res.botInfo) {
+                bot.botInfo = res.botInfo;
+                console.log(`[Multi-Bot Worker] Secondary worker @${bot.botInfo?.username || bot.id} online.`);
+                runSingleSecondaryBotWorker(bot).catch((err) => {
+                  console.log(`[Multi-Bot Worker] Worker notice for ${bot.id}:`, err?.message || err);
+                });
+              } else {
+                bot.isActive = false;
+                saveBotConfig();
+              }
+            })
+            .catch(() => {});
         }
       }
     }

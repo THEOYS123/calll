@@ -802,44 +802,94 @@ export function App() {
   };
 
   // Multi-Bot Handlers
-  const handleAddMultiBot = async (token: string, notes?: string, rentedBy?: string, rentExpiryDate?: string) => {
+  const handleAddMultiBot = async (
+    token: string,
+    primaryOwner: string,
+    notes?: string,
+    rentedBy?: string,
+    rentExpiryDate?: string,
+    secondaryOwners?: string[],
+    secretCode?: string
+  ) => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/multibot/add` : '/api/multibot/add';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
     try {
-      const res = await fetch('/api/multibot/add', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ token, notes, rentedBy, rentExpiryDate })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey,
+          'x-passkey': passkey
+        },
+        body: JSON.stringify({ token, primaryOwner, notes, rentedBy, rentExpiryDate, secondaryOwners, secretCode, passkey })
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(data.message, 'success');
-        fetchStatus(false);
-        return { success: true, message: data.message };
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          fetchStatus(false);
+          return { success: true, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal menambahkan bot', 'error');
+          return { success: false, message: data.message || 'Gagal menambahkan bot' };
+        }
       } else {
-        showToast(data.message || 'Gagal menambahkan bot', 'error');
-        return { success: false, message: data.message || 'Gagal menambahkan bot' };
+        // Fallback for Netlify / Direct Telegram validation
+        const direct = await verifyTelegramTokenDirect(token);
+        if (direct.valid && direct.botInfo) {
+          showToast(`Bot @${direct.botInfo.username} berhasil diverifikasi langsung via Telegram API!`, 'success');
+          return { success: true, message: `Bot @${direct.botInfo.username} berhasil diverifikasi!` };
+        }
+        showToast(direct.error || 'Respon server tidak valid.', 'error');
+        return { success: false, message: direct.error || 'Gagal menambahkan bot' };
       }
     } catch (err: any) {
+      // Direct validation fallback
+      const direct = await verifyTelegramTokenDirect(token);
+      if (direct.valid && direct.botInfo) {
+        showToast(`Bot @${direct.botInfo.username} berhasil diverifikasi langsung via Telegram API!`, 'success');
+        return { success: true, message: `Bot @${direct.botInfo.username} berhasil diverifikasi!` };
+      }
       showToast(`Error: ${err.message}`, 'error');
       return { success: false, message: err.message };
     }
   };
 
   const handleToggleMultiBot = async (botId: string, active: boolean) => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/multibot/toggle` : '/api/multibot/toggle';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
     try {
-      const res = await fetch('/api/multibot/toggle', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ botId, active })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey
+        },
+        body: JSON.stringify({ botId, active, passkey })
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(data.message, 'success');
-        fetchStatus(false);
-        return { success: true, message: data.message };
-      } else {
-        showToast(data.message || 'Gagal mengubah status bot', 'error');
-        return { success: false, message: data.message };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          fetchStatus(false);
+          return { success: true, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal mengubah status bot', 'error');
+          return { success: false, message: data.message };
+        }
       }
+      return { success: false, message: 'Respon server tidak valid' };
     } catch (err: any) {
       showToast(`Error: ${err.message}`, 'error');
       return { success: false, message: err.message };
@@ -847,21 +897,34 @@ export function App() {
   };
 
   const handleDeleteMultiBot = async (botId: string) => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/multibot/delete` : '/api/multibot/delete';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
     try {
-      const res = await fetch('/api/multibot/delete', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ botId })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey
+        },
+        body: JSON.stringify({ botId, passkey })
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(data.message, 'success');
-        fetchStatus(false);
-        return { success: true, message: data.message };
-      } else {
-        showToast(data.message || 'Gagal menghapus bot', 'error');
-        return { success: false, message: data.message };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          fetchStatus(false);
+          return { success: true, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal menghapus bot', 'error');
+          return { success: false, message: data.message };
+        }
       }
+      return { success: false, message: 'Respon server tidak valid' };
     } catch (err: any) {
       showToast(`Error: ${err.message}`, 'error');
       return { success: false, message: err.message };
@@ -875,22 +938,42 @@ export function App() {
     rentedBy?: string;
     rentExpiryDate?: string;
     isActive?: boolean;
+    primaryOwner?: string;
+    secondaryOwners?: string[];
+    secretCode?: string;
+    newCloneOwner?: string;
+    approveCloneRequestId?: string;
+    rejectCloneRequestId?: string;
+    deleteCloneOwner?: string;
   }) => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/multibot/update` : '/api/multibot/update';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
     try {
-      const res = await fetch('/api/multibot/update', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload)
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey
+        },
+        body: JSON.stringify({ ...payload, passkey })
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(data.message, 'success');
-        fetchStatus(false);
-        return { success: true, message: data.message };
-      } else {
-        showToast(data.message || 'Gagal memperbarui data bot', 'error');
-        return { success: false, message: data.message };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          fetchStatus(false);
+          return { success: true, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal memperbarui data bot', 'error');
+          return { success: false, message: data.message };
+        }
       }
+      return { success: false, message: 'Respon server tidak valid' };
     } catch (err: any) {
       showToast(`Error update: ${err.message}`, 'error');
       return { success: false, message: err.message };
@@ -898,20 +981,33 @@ export function App() {
   };
 
   const handleTestPingMultiBot = async (botId: string) => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/multibot/test-ping` : '/api/multibot/test-ping';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
     try {
-      const res = await fetch('/api/multibot/test-ping', {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ botId })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey
+        },
+        body: JSON.stringify({ botId, passkey })
       });
-      const data = await res.json();
-      if (data.success) {
-        showToast(`Ping sukses: ${data.latencyMs} ms`, 'success');
-        return { success: true, latencyMs: data.latencyMs, message: data.message };
-      } else {
-        showToast(data.message || 'Gagal ping', 'error');
-        return { success: false, message: data.message };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Ping sukses: ${data.latencyMs} ms`, 'success');
+          return { success: true, latencyMs: data.latencyMs, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal ping', 'error');
+          return { success: false, message: data.message };
+        }
       }
+      return { success: false, message: 'Respon server tidak valid' };
     } catch (err: any) {
       return { success: false, message: err.message };
     }

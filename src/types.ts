@@ -62,6 +62,7 @@ export interface BotUserEntry {
   dailyQuotaClaimsCount?: number;
   personalQuota?: number;
   personalApiKey?: string;
+  originBotId?: string; // Tracks which bot in the cluster this user registered on
   // Referral & Quota Savings (Tabungan) Fields
   referredByUserId?: number; // ID of inviter who invited this user
   referredAt?: string;
@@ -239,6 +240,18 @@ export interface GroupConfig {
   knownGroups: KnownTelegramGroup[]; // Riwayat grup yang terdeteksi
 }
 
+export const DEFAULT_GROUP_CONFIG: GroupConfig = {
+  allowGroups: true,
+  groupAdminOnly: false,
+  silentFallbackInGroup: true,
+  allowAllCommandsInGroup: true,
+  enableAntiFlood: true,
+  antiFloodCooldownSeconds: 3, // Default jeda anti-spam 3 detik
+  allowedGroupIds: [],
+  blockedGroupIds: [],
+  knownGroups: []
+};
+
 export interface QuotaConfig {
   newUserQuotaEnabled: boolean; // Aktifkan hadiah kuota pengguna baru
   newUserQuotaAmount: number; // Jumlah kuota pengguna baru (default: 5)
@@ -252,9 +265,9 @@ export interface QuotaConfig {
 
 export const DEFAULT_QUOTA_CONFIG: QuotaConfig = {
   newUserQuotaEnabled: true,
-  newUserQuotaAmount: 5,
+  newUserQuotaAmount: 1, // Default: 1x kuota gratis pengguna baru
   dailyQuotaEnabled: true,
-  dailyQuotaAmount: 2,
+  dailyQuotaAmount: 1, // Default: 1x kuota gratis harian
   dailyResetHourWib: 0,
   deductQuotaOnlyOnFound: true,
   allowSearchWithoutApiKey: true,
@@ -512,6 +525,15 @@ export const DEFAULT_MODERATION_CONFIG: ModerationConfig = {
   recentIncidents: []
 };
 
+export interface CloneOwnerRequest {
+  id: string;
+  ownerIdentifier: string; // @username or numeric Chat ID
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
+
 export interface MultiBotInstance {
   id: string; // e.g. "bot_1710000000_123"
   token: string;
@@ -532,6 +554,13 @@ export interface MultiBotInstance {
   notes?: string;
   rentedBy?: string;
   rentExpiryDate?: string;
+
+  // Strict Owner Security & Multi-Owner Controls
+  primaryOwner: string; // Akun Owner Utama (Wajib: @username atau Chat ID)
+  primaryOwnerChatId?: number | null;
+  secondaryOwners?: string[]; // Daftar Owner Clone / Co-Owners yang telah disetujui
+  pendingCloneOwners?: CloneOwnerRequest[]; // Permintaan konfirmasi clone owner
+  secretCode?: string; // Kode rahasia menu owner kustom (default: ax0895)
 }
 
 export interface BotRentalPlan {
@@ -625,6 +654,8 @@ export interface BotStatusState {
   quotaPackages?: QuotaPricePackage[];
   messageLogs?: MessageLogEntry[];
   ownerWebsitePasskey?: string;
+  coOwners?: string[];
+  pendingCoOwners?: CloneOwnerRequest[];
 }
 
 // Legacy types for compatibility
@@ -733,5 +764,44 @@ export interface TopSearchedTarget {
   city: string;
   province: string;
   occupation: string;
+}
+
+// ==========================================
+// TIERED OWNER AUTHENTICATION & JWT TYPES
+// ==========================================
+export type OwnerRole = 'master_owner' | 'bot_primary_owner' | 'clone_owner';
+
+export interface OwnerJwtPayload {
+  sub: string;
+  role: OwnerRole;
+  userId?: number;
+  username?: string;
+  displayName?: string;
+  allowedBotIds: string[]; // ['*'] for master_owner, or list of specific botIds for rented/clone owners
+  sessionId: string;
+  iat: number;
+  exp: number;
+}
+
+export interface OwnerSessionRecord {
+  sessionId: string;
+  role: OwnerRole;
+  userId?: number;
+  username?: string;
+  displayName?: string;
+  allowedBotIds: string[];
+  createdAt: string;
+  expiresAt: string;
+  lastActiveAt: string;
+}
+
+export interface OwnerLoginResponse {
+  success: boolean;
+  message: string;
+  token?: string;
+  role?: OwnerRole;
+  allowedBotIds?: string[];
+  displayName?: string;
+  expiresAt?: string;
 }
 

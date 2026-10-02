@@ -18,6 +18,7 @@ import {
   Zap
 } from 'lucide-react';
 import { TelegramBotInfo, TokenValidationResult } from '../types';
+import { verifyTelegramTokenDirect } from '../utils/netlifyBridge';
 
 interface TokenManagerCardProps {
   currentToken: string;
@@ -67,13 +68,40 @@ export function TokenManagerCard({
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/bot/verify-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: target })
-      });
-      const data: TokenValidationResult = await res.json();
-      setTestResult(data);
+      let data: TokenValidationResult | null = null;
+      try {
+        const res = await fetch('/api/bot/verify-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-web-client': '1' },
+          body: JSON.stringify({ token: target })
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await res.json();
+        }
+      } catch {
+        // Backend not directly reachable
+      }
+
+      if (data) {
+        setTestResult(data);
+      } else {
+        // Direct browser fallback via Telegram API
+        const direct = await verifyTelegramTokenDirect(target);
+        if (direct.valid) {
+          setTestResult({
+            valid: true,
+            botInfo: direct.botInfo,
+            checkedAt: new Date().toISOString()
+          });
+        } else {
+          setTestResult({
+            valid: false,
+            errorMessage: direct.error || 'Gagal memverifikasi token ke Telegram API.',
+            checkedAt: new Date().toISOString()
+          });
+        }
+      }
     } catch (err: any) {
       setTestResult({
         valid: false,

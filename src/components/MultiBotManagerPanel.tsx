@@ -36,7 +36,8 @@ import {
   CalendarDays,
   Timer
 } from 'lucide-react';
-import { MultiBotInstance, BotRentalPlan, DEFAULT_RENTAL_PLANS, TelegramBotInfo } from '../types';
+import { MultiBotInstance, BotRentalPlan, DEFAULT_RENTAL_PLANS, TelegramBotInfo, CloneOwnerRequest } from '../types';
+import { verifyTelegramTokenDirect } from '../utils/netlifyBridge';
 
 interface MultiBotManagerPanelProps {
   primaryBotToken: string;
@@ -44,7 +45,15 @@ interface MultiBotManagerPanelProps {
   isPrimaryActive: boolean;
   multiBots: MultiBotInstance[];
   rentalPlans?: BotRentalPlan[];
-  onAddBot: (token: string, notes?: string, rentedBy?: string, rentExpiryDate?: string) => Promise<{ success: boolean; message: string }>;
+  onAddBot: (
+    token: string,
+    primaryOwner: string,
+    notes?: string,
+    rentedBy?: string,
+    rentExpiryDate?: string,
+    secondaryOwners?: string[],
+    secretCode?: string
+  ) => Promise<{ success: boolean; message: string }>;
   onToggleBot: (botId: string, active: boolean) => Promise<{ success: boolean; message: string }>;
   onDeleteBot: (botId: string) => Promise<{ success: boolean; message: string }>;
   onUpdateBot?: (payload: {
@@ -54,6 +63,13 @@ interface MultiBotManagerPanelProps {
     rentedBy?: string;
     rentExpiryDate?: string;
     isActive?: boolean;
+    primaryOwner?: string;
+    secondaryOwners?: string[];
+    secretCode?: string;
+    newCloneOwner?: string;
+    approveCloneRequestId?: string;
+    rejectCloneRequestId?: string;
+    deleteCloneOwner?: string;
   }) => Promise<{ success: boolean; message: string }>;
   onTestPing: (botId: string) => Promise<{ success: boolean; latencyMs?: number; message: string }>;
   onRefreshList: () => void;
@@ -129,10 +145,14 @@ export function MultiBotManagerPanel({
 }: MultiBotManagerPanelProps) {
   // Add Bot Form State
   const [newToken, setNewToken] = useState<string>('');
+  const [newPrimaryOwner, setNewPrimaryOwner] = useState<string>('');
+  const [newSecondaryOwners, setNewSecondaryOwners] = useState<string>('');
+  const [newSecretCode, setNewSecretCode] = useState<string>('ax0895');
   const [newNotes, setNewNotes] = useState<string>('');
   const [newRentedBy, setNewRentedBy] = useState<string>('');
   const [newExpiryDate, setNewExpiryDate] = useState<string>(''); // YYYY-MM-DD
   const [newExpiryTime, setNewExpiryTime] = useState<string>(''); // HH:mm
+  const [newCustomExpiry, setNewCustomExpiry] = useState<string>(''); // Bebas teks semaunya
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Modals State
@@ -142,10 +162,16 @@ export function MultiBotManagerPanel({
 
   // Edit Bot Form State
   const [editToken, setEditToken] = useState<string>('');
+  const [editPrimaryOwner, setEditPrimaryOwner] = useState<string>('');
+  const [editSecretCode, setEditSecretCode] = useState<string>('ax0895');
+  const [editSecondaryOwners, setEditSecondaryOwners] = useState<string[]>([]);
+  const [editPendingClones, setEditPendingClones] = useState<CloneOwnerRequest[]>([]);
+  const [editNewCloneOwnerInput, setEditNewCloneOwnerInput] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
   const [editRentedBy, setEditRentedBy] = useState<string>('');
   const [editExpiryDate, setEditExpiryDate] = useState<string>(''); // YYYY-MM-DD
   const [editExpiryTime, setEditExpiryTime] = useState<string>(''); // HH:mm
+  const [editCustomExpiry, setEditCustomExpiry] = useState<string>(''); // Bebas teks semaunya
   const [editIsActive, setEditIsActive] = useState<boolean>(true);
   const [isEditSubmitting, setIsEditSubmitting] = useState<boolean>(false);
 
@@ -188,6 +214,69 @@ export function MultiBotManagerPanel({
     });
   }, [multiBots, statusFilter, searchQuery]);
 
+  // Token live test state for Add Bot
+  const [isTestingNewToken, setIsTestingNewToken] = useState<boolean>(false);
+  const [newTokenTestResult, setNewTokenTestResult] = useState<{
+    valid: boolean;
+    botInfo?: any;
+    errorMessage?: string;
+  } | null>(null);
+
+  const handleTestNewToken = async (targetToken?: string) => {
+    const target = (targetToken || newToken).trim();
+    if (!target) {
+      setNewTokenTestResult({ valid: false, errorMessage: 'Masukkan token terlebih dahulu.' });
+      return;
+    }
+    setIsTestingNewToken(true);
+    setNewTokenTestResult(null);
+
+    try {
+      let data: any = null;
+      try {
+        const res = await fetch('/api/multibot/verify-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-web-client': '1' },
+          body: JSON.stringify({ token: target })
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await res.json();
+        }
+      } catch {
+        // Backend not directly reachable
+      }
+
+      if (data) {
+        setNewTokenTestResult({
+          valid: data.valid,
+          botInfo: data.botInfo,
+          errorMessage: data.errorMessage
+        });
+      } else {
+        const direct = await verifyTelegramTokenDirect(target);
+        if (direct.valid) {
+          setNewTokenTestResult({
+            valid: true,
+            botInfo: direct.botInfo
+          });
+        } else {
+          setNewTokenTestResult({
+            valid: false,
+            errorMessage: direct.error || 'Token tidak valid menurut Telegram API.'
+          });
+        }
+      }
+    } catch (err: any) {
+      setNewTokenTestResult({
+        valid: false,
+        errorMessage: `Gagal verifikasi: ${err.message}`
+      });
+    } finally {
+      setIsTestingNewToken(false);
+    }
+  };
+
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -205,9 +294,11 @@ export function MultiBotManagerPanel({
     if (isEdit) {
       setEditExpiryDate(dateStr);
       if (!editExpiryTime) setEditExpiryTime('23:59');
+      setEditCustomExpiry(`${dateStr} 23:59`);
     } else {
       setNewExpiryDate(dateStr);
       if (!newExpiryTime) setNewExpiryTime('23:59');
+      setNewCustomExpiry(`${dateStr} 23:59`);
     }
   };
 
@@ -215,9 +306,11 @@ export function MultiBotManagerPanel({
     if (isEdit) {
       setEditExpiryDate('');
       setEditExpiryTime('');
+      setEditCustomExpiry('Permanen');
     } else {
       setNewExpiryDate('');
       setNewExpiryTime('');
+      setNewCustomExpiry('Permanen');
     }
   };
 
@@ -232,23 +325,48 @@ export function MultiBotManagerPanel({
       return;
     }
 
-    // Combine date + optional time
+    const primaryOwnerTrimmed = newPrimaryOwner.trim();
+    if (!primaryOwnerTrimmed) {
+      setErrorMsg('Akun Owner Utama wajib diisi (@username atau Chat ID Telegram).');
+      return;
+    }
+
+    // Combine date + optional time or custom free text
     let combinedExpiry: string | undefined = undefined;
-    if (newExpiryDate.trim()) {
+    if (newCustomExpiry.trim()) {
+      combinedExpiry = newCustomExpiry.trim();
+    } else if (newExpiryDate.trim()) {
       const timePart = newExpiryTime.trim() || '23:59';
       combinedExpiry = `${newExpiryDate.trim()} ${timePart}`;
     }
 
+    const secondaryList = newSecondaryOwners
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     setIsSubmitting(true);
     try {
-      const res = await onAddBot(tokenTrimmed, newNotes.trim(), newRentedBy.trim(), combinedExpiry);
+      const res = await onAddBot(
+        tokenTrimmed,
+        primaryOwnerTrimmed,
+        newNotes.trim(),
+        newRentedBy.trim(),
+        combinedExpiry,
+        secondaryList,
+        newSecretCode.trim() || 'ax0895'
+      );
       if (res.success) {
-        setSuccessMsg(res.message || 'Bot berhasil ditambahkan ke cluster!');
+        setSuccessMsg(res.message || 'Bot berhasil ditambahkan ke cluster dengan proteksi owner!');
         setNewToken('');
+        setNewPrimaryOwner('');
+        setNewSecondaryOwners('');
+        setNewSecretCode('ax0895');
         setNewNotes('');
         setNewRentedBy('');
         setNewExpiryDate('');
         setNewExpiryTime('');
+        setNewCustomExpiry('');
         onRefreshList();
       } else {
         setErrorMsg(res.message || 'Gagal menambahkan bot.');
@@ -281,16 +399,23 @@ export function MultiBotManagerPanel({
   const handleOpenEdit = (bot: MultiBotInstance) => {
     setSelectedEditBot(bot);
     setEditToken(bot.token || '');
+    setEditPrimaryOwner(bot.primaryOwner || '');
+    setEditSecretCode(bot.secretCode || 'ax0895');
+    setEditSecondaryOwners(bot.secondaryOwners ? [...bot.secondaryOwners] : []);
+    setEditPendingClones(bot.pendingCloneOwners ? [...bot.pendingCloneOwners] : []);
+    setEditNewCloneOwnerInput('');
     setEditNotes(bot.notes || '');
     setEditRentedBy(bot.rentedBy || '');
     setEditIsActive(bot.isActive);
 
-    // Parse existing rentExpiryDate into date & time inputs
+    // Parse existing rentExpiryDate
     if (bot.rentExpiryDate) {
+      setEditCustomExpiry(bot.rentExpiryDate);
       const parts = bot.rentExpiryDate.split(/[ T]/);
       setEditExpiryDate(parts[0] || '');
       setEditExpiryTime(parts[1] ? parts[1].substring(0, 5) : '');
     } else {
+      setEditCustomExpiry('');
       setEditExpiryDate('');
       setEditExpiryTime('');
     }
@@ -300,11 +425,18 @@ export function MultiBotManagerPanel({
     e.preventDefault();
     if (!selectedEditBot || !onUpdateBot) return;
 
+    if (!editPrimaryOwner.trim()) {
+      setErrorMsg('Akun Owner Utama wajib diisi (@username atau Chat ID).');
+      return;
+    }
+
     setIsEditSubmitting(true);
     setErrorMsg(null);
 
     let combinedExpiry: string | undefined = undefined;
-    if (editExpiryDate.trim()) {
+    if (editCustomExpiry.trim()) {
+      combinedExpiry = editCustomExpiry.trim();
+    } else if (editExpiryDate.trim()) {
       const timePart = editExpiryTime.trim() || '23:59';
       combinedExpiry = `${editExpiryDate.trim()} ${timePart}`;
     }
@@ -313,6 +445,9 @@ export function MultiBotManagerPanel({
       const res = await onUpdateBot({
         botId: selectedEditBot.id,
         token: editToken.trim() || undefined,
+        primaryOwner: editPrimaryOwner.trim(),
+        secretCode: editSecretCode.trim() || 'ax0895',
+        secondaryOwners: editSecondaryOwners,
         notes: editNotes.trim(),
         rentedBy: editRentedBy.trim(),
         rentExpiryDate: combinedExpiry,
@@ -320,7 +455,7 @@ export function MultiBotManagerPanel({
       });
 
       if (res.success) {
-        setSuccessMsg(res.message || 'Data bot berhasil diperbarui.');
+        setSuccessMsg(res.message || 'Data bot & konfigurasi owner berhasil diperbarui.');
         setSelectedEditBot(null);
         onRefreshList();
       } else {
@@ -328,6 +463,101 @@ export function MultiBotManagerPanel({
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  const handleApproveCloneRequest = async (reqId: string) => {
+    if (!selectedEditBot || !onUpdateBot) return;
+    setIsEditSubmitting(true);
+    try {
+      const res = await onUpdateBot({
+        botId: selectedEditBot.id,
+        approveCloneRequestId: reqId
+      });
+      if (res.success) {
+        setSuccessMsg(res.message || 'Owner Clone berhasil disetujui!');
+        const approvedReq = editPendingClones.find((p) => p.id === reqId);
+        if (approvedReq && !editSecondaryOwners.includes(approvedReq.ownerIdentifier)) {
+          setEditSecondaryOwners((prev) => [...prev, approvedReq.ownerIdentifier]);
+        }
+        setEditPendingClones((prev) => prev.filter((p) => p.id !== reqId));
+        onRefreshList();
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  const handleRejectCloneRequest = async (reqId: string) => {
+    if (!selectedEditBot || !onUpdateBot) return;
+    setIsEditSubmitting(true);
+    try {
+      const res = await onUpdateBot({
+        botId: selectedEditBot.id,
+        rejectCloneRequestId: reqId
+      });
+      if (res.success) {
+        setSuccessMsg(res.message || 'Permintaan Owner Clone ditolak.');
+        setEditPendingClones((prev) => prev.filter((p) => p.id !== reqId));
+        onRefreshList();
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteCloneOwner = async (ownerStr: string) => {
+    if (!selectedEditBot || !onUpdateBot) return;
+    setIsEditSubmitting(true);
+    try {
+      const res = await onUpdateBot({
+        botId: selectedEditBot.id,
+        deleteCloneOwner: ownerStr
+      });
+      if (res.success) {
+        setSuccessMsg(res.message || `Owner Clone ${ownerStr} berhasil dihapus.`);
+        setEditSecondaryOwners((prev) => prev.filter((o) => o !== ownerStr));
+        onRefreshList();
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  const handleAddNewCloneOwner = async () => {
+    if (!selectedEditBot || !onUpdateBot || !editNewCloneOwnerInput.trim()) return;
+    const target = editNewCloneOwnerInput.trim();
+    setIsEditSubmitting(true);
+    try {
+      const res = await onUpdateBot({
+        botId: selectedEditBot.id,
+        newCloneOwner: target
+      });
+      if (res.success) {
+        setSuccessMsg(
+          `Notifikasi konfirmasi persetujuan telah dikirimkan ke Telegram Owner Utama (${selectedEditBot.primaryOwner}) untuk mengizinkan ${target}!`
+        );
+        setEditNewCloneOwnerInput('');
+        onRefreshList();
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
     } finally {
       setIsEditSubmitting(false);
     }
@@ -381,18 +611,18 @@ export function MultiBotManagerPanel({
     }
   };
 
-  // Preview combined date in form
+  // Preview combined date or custom text in form
   const addExpiryPreview = useMemo(() => {
-    if (!newExpiryDate) return null;
-    const combined = `${newExpiryDate} ${newExpiryTime || '23:59'}`;
-    return calculateRentalStatus(combined);
-  }, [newExpiryDate, newExpiryTime]);
+    const raw = newCustomExpiry.trim() || (newExpiryDate ? `${newExpiryDate} ${newExpiryTime || '23:59'}` : '');
+    if (!raw) return null;
+    return calculateRentalStatus(raw);
+  }, [newCustomExpiry, newExpiryDate, newExpiryTime]);
 
   const editExpiryPreview = useMemo(() => {
-    if (!editExpiryDate) return null;
-    const combined = `${editExpiryDate} ${editExpiryTime || '23:59'}`;
-    return calculateRentalStatus(combined);
-  }, [editExpiryDate, editExpiryTime]);
+    const raw = editCustomExpiry.trim() || (editExpiryDate ? `${editExpiryDate} ${editExpiryTime || '23:59'}` : '');
+    if (!raw) return null;
+    return calculateRentalStatus(raw);
+  }, [editCustomExpiry, editExpiryDate, editExpiryTime]);
 
   return (
     <div id="multibot-manager-panel" className="bg-slate-900 border border-slate-800 rounded-2xl p-6 lg:p-8 shadow-xl relative space-y-6">
@@ -563,19 +793,121 @@ export function MultiBotManagerPanel({
             <form onSubmit={handleAddSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Token Bot Telegram (@BotFather): <span className="text-red-400">*</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-300">
+                      Token Bot Telegram (@BotFather): <span className="text-red-400">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleTestNewToken()}
+                      disabled={isTestingNewToken || !newToken.trim()}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 disabled:opacity-40"
+                    >
+                      {isTestingNewToken ? (
+                        <>
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          <span>Mengecek...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-3 h-3" />
+                          <span>Uji Token</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <input
                     type="text"
                     required
                     placeholder="Contoh: 7891234567:AAHfkjld89723_kjdhs8..."
                     value={newToken}
-                    onChange={(e) => setNewToken(e.target.value)}
+                    onChange={(e) => {
+                      setNewToken(e.target.value);
+                      if (newTokenTestResult) setNewTokenTestResult(null);
+                    }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
+                  {newTokenTestResult && (
+                    <div
+                      className={`mt-1 p-1.5 rounded-lg text-[11px] flex items-center gap-1.5 border ${
+                        newTokenTestResult.valid
+                          ? 'bg-emerald-950/50 border-emerald-800/80 text-emerald-300'
+                          : 'bg-rose-950/50 border-rose-800/80 text-rose-300'
+                      }`}
+                    >
+                      {newTokenTestResult.valid ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>
+                            ✅ Valid: <strong>@{newTokenTestResult.botInfo?.username}</strong> ({newTokenTestResult.botInfo?.first_name || 'Bot'})
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <span>{newTokenTestResult.errorMessage || 'Token tidak valid.'}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5" />
+                    <span>Akun Owner Utama Bot: <span className="text-rose-400">*</span></span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: @flood1233 atau ID 123456789"
+                    value={newPrimaryOwner}
+                    onChange={(e) => setNewPrimaryOwner(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Wajib diisi! Pemilik sah yang berhak mengontrol bot & menyetujui calon clone owner.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5" />
+                    <span>Kode Rahasia Menu Owner (Bisa Kustom):</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Default: ax0895"
+                    value={newSecretCode}
+                    onChange={(e) => setNewSecretCode(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Perintah rahasia untuk membuka menu owner (misal: <code>/ax0895</code>).
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Owner Clone Tambahan (Bisa Lebih Dari 1):</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="cth: @owner2, @owner3 (pisahkan koma)"
+                    value={newSecondaryOwners}
+                    onChange={(e) => setNewSecondaryOwners(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Bot akan mengirim pesan konfirmasi persetujuan ke Telegram Owner Utama sebelum aktif.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-300">
                     Catatan / Label Internal:
@@ -588,9 +920,7 @@ export function MultiBotManagerPanel({
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-300">
                     Nama / Kontak Penyewa (Opsional):
@@ -603,94 +933,121 @@ export function MultiBotManagerPanel({
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
+              </div>
 
-                {/* KALENDER & WAKTU SEWA */}
-                <div className="space-y-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
-                      <CalendarDays className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Masa Berlaku Sewa (Kalender & Waktu):</span>
-                    </label>
-                    <span className="text-[10px] text-slate-400">Opsional</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] text-slate-400">Pilih Tanggal:</span>
-                      <input
-                        type="date"
-                        value={newExpiryDate}
-                        onChange={(e) => setNewExpiryDate(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                      />
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Timer className="w-3 h-3 text-amber-400" />
-                        <span>Jam (Default: 23:59 WIB):</span>
-                      </span>
-                      <input
-                        type="time"
-                        value={newExpiryTime}
-                        onChange={(e) => setNewExpiryTime(e.target.value)}
-                        placeholder="23:59"
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Preset Shortcut Buttons */}
-                  <div className="flex items-center gap-1.5 pt-1 flex-wrap">
-                    <span className="text-[10px] text-slate-500">Preset Cepat:</span>
-                    <button
-                      type="button"
-                      onClick={() => applyDatePreset(30)}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
-                    >
-                      +30 Hari
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyDatePreset(90)}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
-                    >
-                      +90 Hari (3 Bulan)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyDatePreset(365)}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
-                    >
-                      +1 Tahun
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => clearDatePreset()}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[10px] transition-all"
-                    >
-                      Permanen
-                    </button>
-                  </div>
-
-                  {/* Live Expiry Preview */}
-                  {addExpiryPreview && (
-                    <div className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
-                      addExpiryPreview.isExpired
-                        ? 'bg-rose-950/40 border-rose-900/60 text-rose-300'
-                        : 'bg-purple-950/40 border-purple-900/60 text-purple-300'
-                    }`}>
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Masa sewa: <strong>{addExpiryPreview.formattedDate}</strong></span>
-                      </div>
-                      <span className="font-bold">{addExpiryPreview.remainingText}</span>
-                    </div>
-                  )}
-
-                  <p className="text-[10px] text-slate-400 leading-snug">
-                    💡 Jika kolom waktu/jam dikosongkan, sewa otomatis diatur sampai pukul <strong>23:59:59 WIB</strong> pada tanggal yang ditentukan.
-                  </p>
+              {/* KALENDER & WAKTU SEWA - BEBAS INPUT SEMEUNYA */}
+              <div className="space-y-2 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Masa Berlaku Sewa (Input Bebas Semaunya / Kalender):</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400">Fleksibel</span>
                 </div>
+
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-400">Ketik Bebas (cth: Permanen, 30 Hari, 3 Bulan, atau tanggal kustom):</span>
+                  <input
+                    type="text"
+                    placeholder="cth: Permanen, 30 Hari, 90d, atau 2026-12-31 23:59"
+                    value={newCustomExpiry}
+                    onChange={(e) => {
+                      setNewCustomExpiry(e.target.value);
+                      if (e.target.value.trim().match(/^\d{4}-\d{2}-\d{2}/)) {
+                        const parts = e.target.value.trim().split(/[ T]/);
+                        setNewExpiryDate(parts[0] || '');
+                        if (parts[1]) setNewExpiryTime(parts[1].substring(0, 5));
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-slate-400">Atau Pilih Lewat Kalender:</span>
+                    <input
+                      type="date"
+                      value={newExpiryDate}
+                      onChange={(e) => {
+                        setNewExpiryDate(e.target.value);
+                        const time = newExpiryTime.trim() || '23:59';
+                        setNewCustomExpiry(e.target.value ? `${e.target.value} ${time}` : '');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                    />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Timer className="w-3 h-3 text-amber-400" />
+                      <span>Jam (Default: 23:59 WIB):</span>
+                    </span>
+                    <input
+                      type="time"
+                      value={newExpiryTime}
+                      onChange={(e) => {
+                        setNewExpiryTime(e.target.value);
+                        if (newExpiryDate) {
+                          setNewCustomExpiry(`${newExpiryDate} ${e.target.value || '23:59'}`);
+                        }
+                      }}
+                      placeholder="23:59"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Preset Shortcut Buttons */}
+                <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                  <span className="text-[10px] text-slate-500">Preset Cepat:</span>
+                  <button
+                    type="button"
+                    onClick={() => applyDatePreset(30)}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
+                  >
+                    +30 Hari
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyDatePreset(90)}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
+                  >
+                    +90 Hari (3 Bulan)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyDatePreset(365)}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-purple-900/40 text-purple-300 border border-slate-700 hover:border-purple-600 text-[10px] transition-all"
+                  >
+                    +1 Tahun
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => clearDatePreset()}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[10px] transition-all"
+                  >
+                    Permanen
+                  </button>
+                </div>
+
+                {/* Live Expiry Preview */}
+                {addExpiryPreview && (
+                  <div className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                    addExpiryPreview.isExpired
+                      ? 'bg-rose-950/40 border-rose-900/60 text-rose-300'
+                      : 'bg-purple-950/40 border-purple-900/60 text-purple-300'
+                  }`}>
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Masa sewa: <strong>{addExpiryPreview.formattedDate}</strong></span>
+                    </div>
+                    <span className="font-bold">{addExpiryPreview.remainingText}</span>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  💡 Masa sewa dapat diinput semaunya berupa durasi hari, bulan, teks bebas seperti &apos;Permanen&apos;, atau kalender spesifik.
+                </p>
               </div>
 
               <div className="flex items-center justify-between pt-2">
@@ -1524,6 +1881,144 @@ export function MultiBotManagerPanel({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
+                  <label className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5" />
+                    <span>Akun Owner Utama Bot: <span className="text-rose-400">*</span></span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editPrimaryOwner}
+                    onChange={(e) => setEditPrimaryOwner(e.target.value)}
+                    placeholder="cth: @flood1233 atau ID 123456789"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Owner utama adalah pemilik sah yang berhak mengontrol bot & menyetujui clone owner.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5" />
+                    <span>Kode Rahasia Menu Owner (Bisa Diubah Bebas):</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editSecretCode}
+                    onChange={(e) => setEditSecretCode(e.target.value)}
+                    placeholder="cth: ax0895 atau rahasia123"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Perintah rahasia untuk membuka menu owner (misal: <code>/{editSecretCode || 'ax0895'}</code>).
+                  </p>
+                </div>
+              </div>
+
+              {/* KELOLA OWNER CLONE / CO-OWNERS */}
+              <div className="space-y-3 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                    <span>Kelola Owner Clone / Co-Owners (Bisa Lebih Dari 1):</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400">Konfirmasi via Telegram</span>
+                </div>
+
+                {/* Daftar Owner Clone yang Disetujui */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] text-slate-300 font-medium">Owner Clone yang Disetujui ({editSecondaryOwners.length}):</span>
+                  {editSecondaryOwners.length === 0 ? (
+                    <p className="text-[11px] text-slate-500 italic">Belum ada Owner Clone yang terdaftar untuk bot ini.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {editSecondaryOwners.map((owner, idx) => (
+                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
+                          <span className="font-mono text-cyan-300 font-semibold">{owner}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCloneOwner(owner)}
+                            className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/40 text-[10px] flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Daftar Permintaan Pending Menunggu Konfirmasi Owner Utama */}
+                {editPendingClones.filter((p) => p.status === 'pending').length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                    <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>Menunggu Konfirmasi Owner Utama ({editPendingClones.filter((p) => p.status === 'pending').length}):</span>
+                    </span>
+                    <div className="space-y-1">
+                      {editPendingClones
+                        .filter((p) => p.status === 'pending')
+                        .map((req) => (
+                          <div key={req.id} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-950/30 border border-amber-900/50 text-xs">
+                            <div>
+                              <span className="font-mono text-amber-200 font-semibold">{req.ownerIdentifier}</span>
+                              <span className="text-[10px] text-slate-400 ml-2">Diajukan: {new Date(req.requestedAt).toLocaleTimeString('id-ID')}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleApproveCloneRequest(req.id)}
+                                className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-1"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Izinkan</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRejectCloneRequest(req.id)}
+                                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] flex items-center gap-1"
+                              >
+                                <X className="w-3 h-3" />
+                                <span>Tolak</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Form Tambah Calon Owner Clone Baru */}
+                <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                  <span className="text-[10px] text-slate-300 font-medium">Ajukan Calon Owner Clone Baru:</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={editNewCloneOwnerInput}
+                      onChange={(e) => setEditNewCloneOwnerInput(e.target.value)}
+                      placeholder="cth: @calon_clone_owner atau ID 987654321"
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={!editNewCloneOwnerInput.trim() || isEditSubmitting}
+                      onClick={handleAddNewCloneOwner}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-1 transition-all"
+                    >
+                      <Send className="w-3 h-3" />
+                      <span>Kirim Konfirmasi ke Owner</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    💡 Bot akan mengirimkan notifikasi Telegram resmi kepada Owner Utama ({selectedEditBot.primaryOwner}) dengan tombol persetujuan sebelum akun ini diizinkan membuka menu owner.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-300">
                     Catatan / Label Internal:
                   </label>
@@ -1550,23 +2045,45 @@ export function MultiBotManagerPanel({
                 </div>
               </div>
 
-              {/* KALENDER & WAKTU DI EDIT MODAL */}
+              {/* KALENDER & WAKTU DI EDIT MODAL - INPUT BEBAS SEMAUNYA */}
               <div className="space-y-2 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
                     <CalendarDays className="w-4 h-4 text-purple-400" />
-                    <span>Atur Masa Sewa (Tampilan Kalender & Jam):</span>
+                    <span>Masa Berlaku Sewa (Input Bebas Semaunya / Kalender):</span>
                   </label>
-                  <span className="text-[10px] text-slate-400">Opsional</span>
+                  <span className="text-[10px] text-slate-400">Fleksibel</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-400">Input Kustom Bebas (cth: Permanen, 30 Hari, 3 Bulan, atau tanggal bebas):</span>
+                  <input
+                    type="text"
+                    value={editCustomExpiry}
+                    onChange={(e) => {
+                      setEditCustomExpiry(e.target.value);
+                      if (e.target.value.trim().match(/^\d{4}-\d{2}-\d{2}/)) {
+                        const parts = e.target.value.trim().split(/[ T]/);
+                        setEditExpiryDate(parts[0] || '');
+                        if (parts[1]) setEditExpiryTime(parts[1].substring(0, 5));
+                      }
+                    }}
+                    placeholder="cth: Permanen, 30 Hari, 2026-12-31 23:59, atau 90d"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <div className="space-y-1">
-                    <span className="text-[10px] text-slate-400">Pilih Tanggal:</span>
+                    <span className="text-[10px] text-slate-400">Atau Pilih Lewat Kalender:</span>
                     <input
                       type="date"
                       value={editExpiryDate}
-                      onChange={(e) => setEditExpiryDate(e.target.value)}
+                      onChange={(e) => {
+                        setEditExpiryDate(e.target.value);
+                        const time = editExpiryTime.trim() || '23:59';
+                        setEditCustomExpiry(e.target.value ? `${e.target.value} ${time}` : '');
+                      }}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                     />
                   </div>
@@ -1578,7 +2095,12 @@ export function MultiBotManagerPanel({
                     <input
                       type="time"
                       value={editExpiryTime}
-                      onChange={(e) => setEditExpiryTime(e.target.value)}
+                      onChange={(e) => {
+                        setEditExpiryTime(e.target.value);
+                        if (editExpiryDate) {
+                          setEditCustomExpiry(`${editExpiryDate} ${e.target.value || '23:59'}`);
+                        }
+                      }}
                       placeholder="23:59"
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                     />
@@ -1634,7 +2156,7 @@ export function MultiBotManagerPanel({
                 )}
 
                 <p className="text-[10px] text-slate-400 leading-snug">
-                  💡 Jam bersifat opsional. Jika jam dikosongkan, sewa akan berakhir tepat pukul <strong>23:59:59 WIB</strong> pada tanggal yang dipilih.
+                  💡 Masa sewa dapat diinput semaunya berupa durasi hari, bulan, teks bebas seperti &apos;Permanen&apos;, atau kalender spesifik.
                 </p>
               </div>
 

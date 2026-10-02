@@ -71,7 +71,7 @@ export async function verifyTelegramTokenDirect(token: string): Promise<{
   error?: string;
 }> {
   const clean = (token || '').trim();
-  if (!clean || !/^\d{8,12}:[A-Za-z0-9_-]{35}$/.test(clean)) {
+  if (!clean || !/^\d{5,20}:[A-Za-z0-9_-]{20,80}$/.test(clean)) {
     return { valid: false, error: 'Format token bot Telegram tidak valid (contoh: 123456789:ABCdefGhI_jkLmNOPqrstUVwx)' };
   }
 
