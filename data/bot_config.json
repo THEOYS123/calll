@@ -97,7 +97,8 @@
   "osintConfig": {
     "enabled": true,
     "ngrokUrl": "https://ded8-154-18-255-149.ngrok-free.app",
-    "ownerUsername": "",
+    "ownerUsername": "flood1233",
+    "ownerChatId": 6010911941,
     "notifyOnStatusChange": true,
     "searchEngineMode": "smart_dataset",
     "apiKeys": [
@@ -602,5 +603,9 @@
     ],
     "whitelistKeywords": [],
     "recentIncidents": []
-  }
+  },
+  "coOwners": [
+    "flood1233",
+    "puttsyournamee"
+  ]
 }

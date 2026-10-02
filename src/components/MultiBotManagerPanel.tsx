@@ -43,6 +43,10 @@ interface MultiBotManagerPanelProps {
   primaryBotToken: string;
   primaryBotInfo: TelegramBotInfo | null;
   isPrimaryActive: boolean;
+  masterPasskey?: string;
+  masterOwnerUsername?: string;
+  masterOwnerChatId?: number | string | null;
+  masterCoOwners?: string[];
   multiBots: MultiBotInstance[];
   rentalPlans?: BotRentalPlan[];
   onAddBot: (
@@ -71,6 +75,16 @@ interface MultiBotManagerPanelProps {
     rejectCloneRequestId?: string;
     deleteCloneOwner?: string;
   }) => Promise<{ success: boolean; message: string }>;
+  onUpdateMasterBot?: (payload: {
+    token?: string;
+    ownerWebsitePasskey?: string;
+    ownerUsername?: string;
+    ownerChatId?: number | null;
+    coOwners?: string[];
+    isActive?: boolean;
+  }) => Promise<{ success: boolean; message: string }>;
+  onToggleMasterBot?: (active: boolean) => void;
+  onPingMasterBot?: () => Promise<{ success: boolean; latencyMs?: number; message: string }>;
   onTestPing: (botId: string) => Promise<{ success: boolean; latencyMs?: number; message: string }>;
   onRefreshList: () => void;
 }
@@ -134,12 +148,19 @@ export function MultiBotManagerPanel({
   primaryBotToken,
   primaryBotInfo,
   isPrimaryActive,
+  masterPasskey = 'ax0895',
+  masterOwnerUsername = 'flood1233',
+  masterOwnerChatId = 6010911941,
+  masterCoOwners = [],
   multiBots = [],
   rentalPlans = DEFAULT_RENTAL_PLANS,
   onAddBot,
   onToggleBot,
   onDeleteBot,
   onUpdateBot,
+  onUpdateMasterBot,
+  onToggleMasterBot,
+  onPingMasterBot,
   onTestPing,
   onRefreshList
 }: MultiBotManagerPanelProps) {
@@ -159,6 +180,31 @@ export function MultiBotManagerPanel({
   const [selectedDetailBot, setSelectedDetailBot] = useState<MultiBotInstance | null>(null);
   const [selectedEditBot, setSelectedEditBot] = useState<MultiBotInstance | null>(null);
   const [selectedDeleteBot, setSelectedDeleteBot] = useState<MultiBotInstance | null>(null);
+
+  // Master Bot Modals State
+  const [showMasterDetailModal, setShowMasterDetailModal] = useState<boolean>(false);
+  const [showMasterEditModal, setShowMasterEditModal] = useState<boolean>(false);
+  const [showMasterTokenInDetail, setShowMasterTokenInDetail] = useState<boolean>(false);
+  const [showMasterPasskeyInDetail, setShowMasterPasskeyInDetail] = useState<boolean>(false);
+
+  // Master Bot Edit State
+  const [masterEditToken, setMasterEditToken] = useState<string>(primaryBotToken || '');
+  const [masterEditPasskey, setMasterEditPasskey] = useState<string>(masterPasskey || 'ax0895');
+  const [masterEditOwnerUsername, setMasterEditOwnerUsername] = useState<string>(masterOwnerUsername || 'flood1233');
+  const [masterEditOwnerChatId, setMasterEditOwnerChatId] = useState<string>(String(masterOwnerChatId || '6010911941'));
+  const [masterEditCoOwners, setMasterEditCoOwners] = useState<string[]>(masterCoOwners || []);
+  const [masterEditNewCoOwnerInput, setMasterEditNewCoOwnerInput] = useState<string>('');
+  const [masterEditIsActive, setMasterEditIsActive] = useState<boolean>(isPrimaryActive);
+  const [isMasterEditSubmitting, setIsMasterEditSubmitting] = useState<boolean>(false);
+
+  // Live Test Token for Master Edit
+  const [isTestingMasterToken, setIsTestingMasterToken] = useState<boolean>(false);
+  const [masterTokenTestResult, setMasterTokenTestResult] = useState<{
+    valid: boolean;
+    botInfo?: any;
+    errorMessage?: string;
+    latencyMs?: number;
+  } | null>(null);
 
   // Edit Bot Form State
   const [editToken, setEditToken] = useState<string>('');
@@ -281,6 +327,108 @@ export function MultiBotManagerPanel({
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  // Master Bot Action Handlers
+  const handleOpenMasterEdit = () => {
+    setMasterEditToken(primaryBotToken || '');
+    setMasterEditPasskey(masterPasskey || 'ax0895');
+    setMasterEditOwnerUsername(masterOwnerUsername || 'flood1233');
+    setMasterEditOwnerChatId(masterOwnerChatId ? String(masterOwnerChatId) : '6010911941');
+    setMasterEditCoOwners(masterCoOwners ? [...masterCoOwners] : []);
+    setMasterEditNewCoOwnerInput('');
+    setMasterEditIsActive(isPrimaryActive);
+    setMasterTokenTestResult(null);
+    setShowMasterEditModal(true);
+  };
+
+  const handleTestMasterToken = async () => {
+    const target = masterEditToken.trim();
+    if (!target) {
+      setMasterTokenTestResult({ valid: false, errorMessage: 'Masukkan token terlebih dahulu.' });
+      return;
+    }
+    setIsTestingMasterToken(true);
+    setMasterTokenTestResult(null);
+
+    try {
+      let data: any = null;
+      try {
+        const res = await fetch('/api/bot/verify-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-web-client': '1' },
+          body: JSON.stringify({ token: target })
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          data = await res.json();
+        }
+      } catch {}
+
+      if (!data || data.valid === undefined) {
+        const direct = await verifyTelegramTokenDirect(target);
+        data = {
+          valid: direct.valid,
+          botInfo: direct.botInfo,
+          errorMessage: direct.error,
+          latencyMs: 110
+        };
+      }
+
+      setMasterTokenTestResult(data);
+    } catch (err: any) {
+      setMasterTokenTestResult({
+        valid: false,
+        errorMessage: err.message || 'Gagal memverifikasi token.'
+      });
+    } finally {
+      setIsTestingMasterToken(false);
+    }
+  };
+
+  const handleSaveMasterEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdateMasterBot) return;
+
+    setIsMasterEditSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const res = await onUpdateMasterBot({
+        token: masterEditToken.trim() || undefined,
+        ownerWebsitePasskey: masterEditPasskey.trim() || undefined,
+        ownerUsername: masterEditOwnerUsername.trim() || undefined,
+        ownerChatId: masterEditOwnerChatId.trim() ? Number(masterEditOwnerChatId.trim()) : undefined,
+        coOwners: masterEditCoOwners,
+        isActive: masterEditIsActive
+      });
+
+      if (res.success) {
+        setSuccessMsg(res.message || 'Master Bot berhasil diperbarui!');
+        setShowMasterEditModal(false);
+        onRefreshList();
+        setTimeout(() => setSuccessMsg(null), 4000);
+      } else {
+        setErrorMsg(res.message || 'Gagal memperbarui Master Bot');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Terjadi kesalahan saat menyimpan');
+    } finally {
+      setIsMasterEditSubmitting(false);
+    }
+  };
+
+  const handlePingMaster = async () => {
+    if (onPingMasterBot) {
+      setActionLoadingId('master_bot');
+      const res = await onPingMasterBot();
+      if (res.latencyMs !== undefined) {
+        setPingResults((prev) => ({
+          ...prev,
+          master_bot: { latencyMs: res.latencyMs!, time: 'Baru saja' }
+        }));
+      }
+      setActionLoadingId(null);
+    }
   };
 
   // Helper for quick date presets
@@ -1135,21 +1283,21 @@ export function MultiBotManagerPanel({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* PRIMARY MASTER BOT CARD */}
-              <div className="bg-slate-950/80 border-2 border-amber-500/40 rounded-2xl p-5 shadow-xl space-y-3 relative overflow-hidden">
-                <div className="absolute -right-8 -top-8 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+              <div className="bg-slate-950/90 border-2 border-amber-500/50 rounded-2xl p-5 shadow-2xl space-y-3.5 relative overflow-hidden transition-all hover:border-amber-500/70">
+                <div className="absolute -right-8 -top-8 w-28 h-28 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
                 
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold text-sm shadow">
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-base shadow-lg shadow-amber-950/40">
                       👑
                     </div>
                     <div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-sm font-bold text-slate-100">
                           {primaryBotInfo?.first_name || 'Master Bot Utama'}
                         </span>
-                        <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] rounded-full font-mono font-bold">
-                          PRIMARY MASTER
+                        <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] rounded-full font-mono font-bold flex items-center gap-1">
+                          <span>PRIMARY MASTER</span>
                         </span>
                       </div>
                       {primaryBotInfo?.username ? (
@@ -1157,7 +1305,7 @@ export function MultiBotManagerPanel({
                           href={`https://t.me/${primaryBotInfo.username}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs text-cyan-400 hover:underline flex items-center gap-1 mt-0.5"
+                          className="text-xs text-cyan-400 hover:underline flex items-center gap-1 mt-0.5 font-medium"
                         >
                           @{primaryBotInfo.username}
                           <ExternalLink className="w-2.5 h-2.5" />
@@ -1168,27 +1316,49 @@ export function MultiBotManagerPanel({
                     </div>
                   </div>
 
-                  <span
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
-                      isPrimaryActive
-                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-                        : 'bg-red-950/80 text-red-300 border border-red-800'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${isPrimaryActive ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-                    <span>{isPrimaryActive ? 'ONLINE' : 'OFFLINE'}</span>
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm ${
+                        isPrimaryActive
+                          ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/80'
+                          : 'bg-red-950/90 text-red-300 border border-red-800/80'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${isPrimaryActive ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+                      <span>{isPrimaryActive ? 'ONLINE' : 'OFFLINE'}</span>
+                    </span>
+                    {onToggleMasterBot && (
+                      <button
+                        onClick={() => onToggleMasterBot(!isPrimaryActive)}
+                        className={`p-1.5 rounded-lg border transition-all ${
+                          isPrimaryActive
+                            ? 'bg-red-950/60 text-red-400 border-red-900/60 hover:bg-red-900/80'
+                            : 'bg-emerald-950/60 text-emerald-400 border-emerald-900/60 hover:bg-emerald-900/80'
+                        }`}
+                        title={isPrimaryActive ? 'Matikan Master Bot' : 'Nyalakan Master Bot'}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800 text-xs space-y-1.5 font-mono">
+                {/* Specs Box with Secret Code & Token */}
+                <div className="bg-slate-900/90 rounded-xl p-3.5 border border-slate-800/90 text-xs space-y-2 font-mono">
+                  {/* Token Row */}
                   <div className="flex justify-between items-center text-slate-400">
-                    <span>Token:</span>
+                    <span className="flex items-center gap-1">
+                      <Key className="w-3 h-3 text-cyan-400" />
+                      <span>Token Master:</span>
+                    </span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-slate-200">{primaryBotToken ? primaryBotToken.substring(0, 10) + '...' : '-'}</span>
+                      <span className="text-slate-200">
+                        {primaryBotToken ? primaryBotToken.substring(0, 8) + '...' + primaryBotToken.slice(-4) : '-'}
+                      </span>
                       {primaryBotToken && (
                         <button
                           onClick={() => handleCopy(primaryBotToken, 'primary_token')}
-                          className="text-slate-400 hover:text-cyan-400"
+                          className="text-slate-400 hover:text-cyan-400 p-0.5"
                           title="Salin token"
                         >
                           {copiedId === 'primary_token' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1196,16 +1366,86 @@ export function MultiBotManagerPanel({
                       )}
                     </div>
                   </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Role:</span>
-                    <span className="text-amber-300">Master Controller Principal</span>
+
+                  {/* Kode Rahasia Row */}
+                  <div className="flex justify-between items-center text-slate-400 pt-0.5 border-t border-slate-800/60">
+                    <span className="flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-amber-400" />
+                      <span>Kode Rahasia Owner:</span>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded font-bold">
+                        {masterPasskey || 'ax0895'}
+                      </span>
+                      <button
+                        onClick={() => handleCopy(masterPasskey || 'ax0895', 'primary_passkey')}
+                        className="text-slate-400 hover:text-amber-400 p-0.5"
+                        title="Salin kode rahasia"
+                      >
+                        {copiedId === 'primary_passkey' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Owner Utama Row */}
+                  <div className="flex justify-between items-center text-slate-400 pt-0.5 border-t border-slate-800/60">
+                    <span className="flex items-center gap-1">
+                      <Crown className="w-3 h-3 text-amber-400" />
+                      <span>Owner Utama:</span>
+                    </span>
+                    <span className="text-amber-300 font-semibold">
+                      @{masterOwnerUsername ? masterOwnerUsername.replace(/^@/, '') : 'flood1233'}
+                    </span>
+                  </div>
+
+                  {/* Latency Ping */}
+                  {pingResults['master_bot'] && (
+                    <div className="flex justify-between items-center text-slate-400 pt-0.5 border-t border-slate-800/60">
+                      <span className="flex items-center gap-1">
+                        <Activity className="w-3 h-3 text-emerald-400" />
+                        <span>Latensi Server:</span>
+                      </span>
+                      <span className="text-emerald-400 font-bold">
+                        {pingResults['master_bot'].latencyMs} ms ({pingResults['master_bot'].time})
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-[11px] text-slate-400">
-                    Konfigurasi via Overview / Master Switch
-                  </span>
+                {/* Master Action Buttons */}
+                <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowMasterDetailModal(true)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Lihat detail lengkap Master Bot"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Detail</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenMasterEdit}
+                      className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Edit token, kode rahasia, dan owner Master Bot"
+                    >
+                      <Edit className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Edit Master Bot</span>
+                    </button>
+                    {onPingMasterBot && (
+                      <button
+                        type="button"
+                        onClick={handlePingMaster}
+                        disabled={actionLoadingId === 'master_bot'}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs transition-colors"
+                        title="Uji koneksi ping Master Bot"
+                      >
+                        <Zap className={`w-3.5 h-3.5 text-amber-400 ${actionLoadingId === 'master_bot' ? 'animate-spin' : ''}`} />
+                      </button>
+                    )}
+                  </div>
+
                   {primaryBotInfo?.username && (
                     <a
                       href={`https://t.me/${primaryBotInfo.username}`}
@@ -1605,6 +1845,519 @@ export function MultiBotManagerPanel({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: DETAIL MASTER BOT LENGKAP */}
+      {/* ========================================================================= */}
+      {showMasterDetailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-lg shadow-lg shadow-amber-950/40">
+                  👑
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <span>{primaryBotInfo?.first_name || 'Master Bot Utama'}</span>
+                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] rounded-full font-mono font-bold">
+                      PRIMARY MASTER
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      isPrimaryActive
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : 'bg-red-950 text-red-300 border border-red-800'
+                    }`}>
+                      {isPrimaryActive ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    ID Master: <code className="text-amber-300 font-mono">{primaryBotInfo?.id || 'master'}</code>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowMasterDetailModal(false)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Grid Information */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+              {/* Telegram Info Card */}
+              <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                <div className="text-xs font-bold text-cyan-400 font-sans flex items-center gap-1.5 pb-1 border-b border-slate-800">
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>Metadata Telegram API</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Username:</span>
+                  <span className="text-slate-200">
+                    {primaryBotInfo?.username ? `@${primaryBotInfo.username}` : '-'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Nama Pertama:</span>
+                  <span className="text-slate-200 font-sans">{primaryBotInfo?.first_name || '-'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Join Grup:</span>
+                  <span className={primaryBotInfo?.can_join_groups !== false ? 'text-emerald-400' : 'text-red-400'}>
+                    {primaryBotInfo?.can_join_groups !== false ? 'Diizinkan (Yes)' : 'Dilarang'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Mode Baca Pesan:</span>
+                  <span className="text-slate-200">
+                    {primaryBotInfo?.can_read_all_group_messages ? 'Privacy Mode OFF' : 'Default (Privacy Mode ON)'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Inline Queries:</span>
+                  <span className="text-slate-200">
+                    {primaryBotInfo?.supports_inline_queries ? 'Didukung' : 'Tidak'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Master Cluster Specs */}
+              <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                <div className="text-xs font-bold text-amber-400 font-sans flex items-center gap-1.5 pb-1 border-b border-slate-800">
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>Spesifikasi Master Controller</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Role:</span>
+                  <span className="text-amber-300 font-bold">Principal Master</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Status Operasional:</span>
+                  <span className={isPrimaryActive ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                    {isPrimaryActive ? '🟢 Online (Always-ON)' : '🔴 Offline (Dijeda)'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Owner Utama:</span>
+                  <span className="text-amber-300 font-bold">
+                    @{masterOwnerUsername ? masterOwnerUsername.replace(/^@/, '') : 'flood1233'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Co-Owners:</span>
+                  <span className="text-slate-200">
+                    {(masterCoOwners || []).map((c) => `@${c.replace(/^@/, '')}`).join(', ') || 'Belum ada'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Total Secondary Bot:</span>
+                  <span className="text-cyan-400 font-bold">{multiBots.length} bot worker</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Latensi Server:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {pingResults['master_bot']?.latencyMs !== undefined ? `${pingResults['master_bot'].latencyMs} ms` : 'Terkoneksi'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Token Details */}
+            <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                <span className="text-xs font-bold text-slate-300 font-sans flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Token HTTP Bot API (Master)</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowMasterTokenInDetail(!showMasterTokenInDetail)}
+                    className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 font-sans"
+                  >
+                    {showMasterTokenInDetail ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showMasterTokenInDetail ? 'Sembunyikan' : 'Perlihatkan'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleCopy(primaryBotToken || '', 'detail_master_token')}
+                    className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1 font-sans"
+                  >
+                    {copiedId === 'detail_master_token' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>Salin Token</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-slate-900 rounded-lg text-slate-200 break-all select-all font-mono">
+                {showMasterTokenInDetail ? primaryBotToken : (primaryBotToken ? primaryBotToken.substring(0, 8) + '••••••••••••••••••••••••' + primaryBotToken.slice(-4) : '-')}
+              </div>
+            </div>
+
+            {/* Secret Code Details */}
+            <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                <span className="text-xs font-bold text-amber-300 font-sans flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Kode Rahasia Menu Owner Master (Passkey)</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowMasterPasskeyInDetail(!showMasterPasskeyInDetail)}
+                    className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 font-sans"
+                  >
+                    {showMasterPasskeyInDetail ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showMasterPasskeyInDetail ? 'Sembunyikan' : 'Perlihatkan'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleCopy(masterPasskey || 'ax0895', 'detail_master_passkey')}
+                    className="text-[11px] text-amber-400 hover:underline flex items-center gap-1 font-sans"
+                  >
+                    {copiedId === 'detail_master_passkey' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>Salin Kode</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-slate-900 rounded-lg text-amber-300 font-bold break-all select-all font-mono flex items-center justify-between">
+                <span>{showMasterPasskeyInDetail ? (masterPasskey || 'ax0895') : '••••••••'}</span>
+                <span className="text-[10px] text-slate-400 font-sans font-normal">
+                  Ketik kode ini di chat bot untuk akses Owner
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-sans leading-relaxed">
+                💡 Kode ini dapat digunakan di Telegram (contoh: <code className="text-amber-300">/{masterPasskey || 'ax0895'}</code> atau ketik <code className="text-amber-300">{masterPasskey || 'ax0895'}</code>) untuk membuka Menu Rahasia Master Owner.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMasterDetailModal(false);
+                    handleOpenMasterEdit();
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-lg shadow-amber-950/40"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Edit Master Bot</span>
+                </button>
+                {onPingMasterBot && (
+                  <button
+                    type="button"
+                    onClick={handlePingMaster}
+                    disabled={actionLoadingId === 'master_bot'}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
+                  >
+                    <Zap className={`w-3.5 h-3.5 text-amber-400 ${actionLoadingId === 'master_bot' ? 'animate-spin' : ''}`} />
+                    <span>Uji Ping</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {primaryBotInfo?.username && (
+                  <a
+                    href={`https://t.me/${primaryBotInfo.username}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Buka di Telegram</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => setShowMasterDetailModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDIT MASTER BOT (TOKEN, KODE RAHASIA OWNER, OWNER UTAMA & CO-OWNER) */}
+      {/* ========================================================================= */}
+      {showMasterEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border-2 border-amber-500/60 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-base shadow">
+                  👑
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <span>Edit Konfigurasi Master Bot</span>
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Ganti Token, Kode Rahasia Menu Owner, dan Kepemilikan Master Bot
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowMasterEditModal(false)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Edit Form */}
+            <form onSubmit={handleSaveMasterEdit} className="space-y-4 text-xs font-sans">
+              {/* Field 1: Token Bot Telegram (@BotFather) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Token Master Bot Telegram (@BotFather):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleTestMasterToken}
+                    disabled={isTestingMasterToken || !masterEditToken.trim()}
+                    className="px-2.5 py-1 bg-cyan-950/90 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/60 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  >
+                    {isTestingMasterToken ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <span>Menguji...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3 h-3 text-cyan-400" />
+                        <span>Uji Token</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  value={masterEditToken}
+                  onChange={(e) => {
+                    setMasterEditToken(e.target.value);
+                    setMasterTokenTestResult(null);
+                  }}
+                  placeholder="8844419832:AAEoxjt7C0VJ_V2d30CHo..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-amber-500"
+                />
+
+                {/* Token Test Live Feedback */}
+                {masterTokenTestResult && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs flex items-start justify-between gap-3 animate-in fade-in duration-200 ${
+                      masterTokenTestResult.valid
+                        ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                        : 'bg-rose-950/60 border-rose-800 text-rose-300'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      {masterTokenTestResult.valid ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                      )}
+                      <div>
+                        {masterTokenTestResult.valid ? (
+                          <div className="space-y-0.5">
+                            <div className="font-bold flex items-center gap-2">
+                              <span>Token Master Valid & Terverifikasi!</span>
+                              {masterTokenTestResult.latencyMs && (
+                                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-900/60 rounded font-mono font-normal">
+                                  {masterTokenTestResult.latencyMs} ms
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-emerald-200 font-mono">
+                              Bot: <strong>{masterTokenTestResult.botInfo?.first_name || 'Bot'}</strong> (@{masterTokenTestResult.botInfo?.username || '-'})
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-bold">Token Tidak Valid / Ditolak Telegram</div>
+                            <div className="text-[11px] text-rose-200/90 mt-0.5">
+                              {masterTokenTestResult.errorMessage || 'Pastikan token dari @BotFather disalin lengkap tanpa spasi.'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Field 2: Kode Rahasia Menu Owner (Owner Passkey) */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Kode Rahasia Menu Owner (Passkey):</span>
+                </label>
+                <input
+                  type="text"
+                  value={masterEditPasskey}
+                  onChange={(e) => setMasterEditPasskey(e.target.value)}
+                  placeholder="ax0895"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-bold font-mono placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  💡 Kode rahasia ini digunakan untuk memanggil menu kontrol rahasia Master di Telegram (contoh: <code className="text-amber-300">/{masterEditPasskey || 'ax0895'}</code>) dan kata kunci akses Web Controller.
+                </p>
+              </div>
+
+              {/* Field 3: Owner Utama Master (@username atau ID) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Username Owner Utama:</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">@</span>
+                    <input
+                      type="text"
+                      value={masterEditOwnerUsername.replace(/^@/, '')}
+                      onChange={(e) => setMasterEditOwnerUsername(e.target.value.replace(/^@/, ''))}
+                      placeholder="flood1233"
+                      className="w-full pl-7 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Chat ID Owner Utama (Opsional):
+                  </label>
+                  <input
+                    type="text"
+                    value={masterEditOwnerChatId}
+                    onChange={(e) => setMasterEditOwnerChatId(e.target.value)}
+                    placeholder="6010911941"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Field 4: Kelola Co-Owner Master */}
+              <div className="space-y-2 pt-1 border-t border-slate-800">
+                <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Daftar Co-Owner Master Tambahan:</span>
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    {masterEditCoOwners.length} akun terdaftar
+                  </span>
+                </label>
+
+                {/* Input Add Co-Owner */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">@</span>
+                    <input
+                      type="text"
+                      value={masterEditNewCoOwnerInput}
+                      onChange={(e) => setMasterEditNewCoOwnerInput(e.target.value)}
+                      placeholder="username_atau_ID_co_owner"
+                      className="w-full pl-7 pr-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = masterEditNewCoOwnerInput.trim().replace(/^@/, '');
+                      if (clean && !masterEditCoOwners.includes(clean)) {
+                        setMasterEditCoOwners([...masterEditCoOwners, clean]);
+                        setMasterEditNewCoOwnerInput('');
+                      }
+                    }}
+                    disabled={!masterEditNewCoOwnerInput.trim()}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs disabled:opacity-40"
+                  >
+                    + Tambah
+                  </button>
+                </div>
+
+                {/* List Co-Owners Chips */}
+                {masterEditCoOwners.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {masterEditCoOwners.map((owner) => (
+                      <span
+                        key={owner}
+                        className="px-2.5 py-1 bg-slate-950 text-slate-200 border border-slate-700 rounded-lg text-[11px] flex items-center gap-1.5 font-mono"
+                      >
+                        <span>@{owner.replace(/^@/, '')}</span>
+                        <button
+                          type="button"
+                          onClick={() => setMasterEditCoOwners(masterEditCoOwners.filter((o) => o !== owner))}
+                          className="text-slate-400 hover:text-red-400 ml-0.5"
+                          title="Hapus Co-Owner"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 italic">Belum ada Co-Owner Master tambahan.</p>
+                )}
+              </div>
+
+              {/* Field 5: Status Polling Always-ON */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                <input
+                  type="checkbox"
+                  id="masterEditIsActive"
+                  checked={masterEditIsActive}
+                  onChange={(e) => setMasterEditIsActive(e.target.checked)}
+                  className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500"
+                />
+                <label htmlFor="masterEditIsActive" className="text-xs text-slate-300 font-semibold cursor-pointer">
+                  Aktifkan Master Bot (Always-ON Telegram Polling)
+                </label>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowMasterEditModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isMasterEditSubmitting}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-50 shadow-lg shadow-amber-950/40"
+                >
+                  {isMasterEditSubmitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Simpan Perubahan Master</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

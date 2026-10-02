@@ -1013,6 +1013,78 @@ export function App() {
     }
   };
 
+  // Master Bot Update & Ping Handlers
+  const handleUpdateMasterBot = async (payload: {
+    token?: string;
+    ownerWebsitePasskey?: string;
+    ownerUsername?: string;
+    ownerChatId?: number | null;
+    coOwners?: string[];
+    isActive?: boolean;
+  }): Promise<{ success: boolean; message: string }> => {
+    const customBase = getCustomApiUrl();
+    const endpoint = customBase ? `${customBase}/api/masterbot/update` : '/api/masterbot/update';
+    const passkey = localStorage.getItem('owner_passkey_session') || status.ownerWebsitePasskey || 'ax0895';
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-web-client': '1',
+          'x-owner-passkey': passkey,
+          'x-owner-username': status.osintConfig?.ownerUsername || 'flood1233',
+          'x-owner-chat-id': String(status.osintConfig?.ownerChatId || '6010911941'),
+          'x-requested-with': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(payload)
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'Master Bot berhasil diperbarui!', 'success');
+          fetchStatus(false);
+          return { success: true, message: data.message };
+        } else {
+          showToast(data.message || 'Gagal memperbarui Master Bot', 'error');
+          return { success: false, message: data.message || 'Gagal memperbarui Master Bot' };
+        }
+      }
+      return { success: false, message: 'Respon server tidak valid' };
+    } catch (err: any) {
+      if (payload.token) {
+        return handleUpdateToken(payload.token);
+      }
+      showToast(err.message, 'error');
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handlePingMasterBot = async (): Promise<{ success: boolean; latencyMs?: number; message: string }> => {
+    try {
+      const res = await fetch('/api/masterbot/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Ping Master Bot: ${data.latencyMs} ms`, 'success');
+          return { success: true, latencyMs: data.latencyMs, message: data.message };
+        } else {
+          showToast(data.message || 'Ping gagal', 'error');
+          return { success: false, message: data.message };
+        }
+      }
+      return { success: false, message: 'Respon server tidak valid' };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
   // Switch to Direct Message with Prefilled Chat ID
   const handleSelectUserForChat = (chatId: number) => {
     setPrefilledChatId(chatId);
@@ -1439,6 +1511,10 @@ export function App() {
               primaryBotToken={status.token}
               primaryBotInfo={status.botInfo}
               isPrimaryActive={status.isActive}
+              masterPasskey={status.ownerWebsitePasskey || 'ax0895'}
+              masterOwnerUsername={status.osintConfig?.ownerUsername || 'flood1233'}
+              masterOwnerChatId={status.osintConfig?.ownerChatId || 6010911941}
+              masterCoOwners={status.coOwners || []}
               multiBots={status.multiBots || []}
               rentalPlans={status.rentalPlans || DEFAULT_RENTAL_PLANS}
               onAddBot={handleAddMultiBot}
@@ -1446,6 +1522,9 @@ export function App() {
               onDeleteBot={handleDeleteMultiBot}
               onUpdateBot={handleUpdateMultiBot}
               onTestPing={handleTestPingMultiBot}
+              onUpdateMasterBot={handleUpdateMasterBot}
+              onToggleMasterBot={handleToggleActive}
+              onPingMasterBot={handlePingMasterBot}
               onRefreshList={() => fetchStatus(false)}
             />
           </div>

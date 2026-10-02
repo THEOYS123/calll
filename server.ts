@@ -103,7 +103,8 @@ const datasetUpload = multer({
 const DEFAULT_OSINT_CONFIG: OsintConfig = {
   enabled: false, // Default is OFF: must be explicitly turned on by owner
   ngrokUrl: 'https://dd60-180-247-62-62.ngrok-free.app',
-  ownerUsername: '',
+  ownerUsername: 'flood1233',
+  ownerChatId: 6010911941,
   notifyOnStatusChange: true,
   searchEngineMode: 'smart_dataset', // Smart auto-search dataset.txt is primary!
   apiKeys: [
@@ -923,29 +924,38 @@ export function isUserAuthorizedOwner(
   const numericId = Number(from.id);
   const usernameClean = (from.username || '').toLowerCase().replace(/^@/, '').trim();
 
+  // Strict Master Creator credentials - ONLY official creator @flood1233 / 6010911941
+  const defaultMasterUsernames = ['flood1233'];
+  const defaultMasterChatIds = [6010911941];
+
   // 1. Check Global / Master Bot Owner
-  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || '').toLowerCase().replace(/^@/, '').trim();
-  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : null;
+  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || 'flood1233').toLowerCase().replace(/^@/, '').trim();
+  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : 6010911941;
   const masterCoOwners = (botConfig.coOwners || []).map((o) => o.toLowerCase().replace(/^@/, '').trim());
 
   const isMasterOwner =
     (masterOwnerChatId !== null && masterOwnerChatId > 0 && numericId === masterOwnerChatId) ||
     (masterOwnerUsername.length > 0 && usernameClean.length > 0 && usernameClean === masterOwnerUsername) ||
     (masterOwnerUsername.length > 0 && !isNaN(Number(masterOwnerUsername)) && numericId === Number(masterOwnerUsername)) ||
+    (usernameClean.length > 0 && defaultMasterUsernames.includes(usernameClean)) ||
+    (numericId > 0 && defaultMasterChatIds.includes(numericId)) ||
     (usernameClean.length > 0 && masterCoOwners.includes(usernameClean)) ||
     (numericId > 0 && masterCoOwners.includes(String(numericId)));
 
   // If no sourceBot, this is the Master Bot
   if (!sourceBot) {
     if (isMasterOwner) {
-      if (usernameClean === masterOwnerUsername && !botConfig.osintConfig.ownerChatId && numericId > 0) {
+      if ((!botConfig.osintConfig.ownerChatId || botConfig.osintConfig.ownerChatId !== numericId) && numericId > 0) {
         botConfig.osintConfig.ownerChatId = numericId;
+        if (!botConfig.osintConfig.ownerUsername && usernameClean) {
+          botConfig.osintConfig.ownerUsername = usernameClean;
+        }
         saveBotConfig();
       }
       return {
         authorized: true,
         role: 'master_owner',
-        ownerDisplay: masterOwnerUsername ? `@${masterOwnerUsername}` : String(masterOwnerChatId || numericId)
+        ownerDisplay: masterOwnerUsername ? `@${masterOwnerUsername}` : (usernameClean ? `@${usernameClean}` : String(masterOwnerChatId || numericId))
       };
     }
     return {
@@ -956,6 +966,15 @@ export function isUserAuthorizedOwner(
   }
 
   // 2. Check Specific Secondary / Cloned Cluster Bot (Sewa Bot)
+  // Super-admin bypass: Global Master Owner always has administrative access across all secondary cluster bots
+  if (isMasterOwner) {
+    return {
+      authorized: true,
+      role: 'master_owner',
+      ownerDisplay: masterOwnerUsername ? `@${masterOwnerUsername}` : (usernameClean ? `@${usernameClean}` : String(masterOwnerChatId || numericId))
+    };
+  }
+
   const botPrimaryOwnerRaw = (sourceBot.primaryOwner || '').trim();
   const botPrimaryOwnerClean = botPrimaryOwnerRaw.toLowerCase().replace(/^@/, '').trim();
   const botPrimaryChatId = sourceBot.primaryOwnerChatId ? Number(sourceBot.primaryOwnerChatId) : null;
@@ -1040,14 +1059,18 @@ export function checkCallerIsAuthorizedOwner(req: any): { authorized: boolean; r
   const cleanUn = rawUsername ? String(rawUsername).toLowerCase().replace(/^@/, '').trim() : '';
 
   // Check Master Owner & Co-Owners
-  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || '').toLowerCase().replace(/^@/, '').trim();
-  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : null;
+  const defaultMasterUsernames = ['flood1233'];
+  const defaultMasterChatIds = [6010911941];
+  const masterOwnerUsername = (botConfig.osintConfig?.ownerUsername || 'flood1233').toLowerCase().replace(/^@/, '').trim();
+  const masterOwnerChatId = botConfig.osintConfig?.ownerChatId ? Number(botConfig.osintConfig.ownerChatId) : 6010911941;
   const masterCoOwners = (botConfig.coOwners || []).map((o) => o.toLowerCase().replace(/^@/, '').trim());
 
   if (
     (masterOwnerChatId !== null && masterOwnerChatId > 0 && numChatId === masterOwnerChatId) ||
     (masterOwnerUsername.length > 0 && cleanUn.length > 0 && cleanUn === masterOwnerUsername) ||
     (masterOwnerUsername.length > 0 && !isNaN(Number(masterOwnerUsername)) && numChatId === Number(masterOwnerUsername)) ||
+    (cleanUn.length > 0 && defaultMasterUsernames.includes(cleanUn)) ||
+    (numChatId > 0 && defaultMasterChatIds.includes(numChatId)) ||
     (cleanUn.length > 0 && masterCoOwners.includes(cleanUn)) ||
     (numChatId > 0 && masterCoOwners.includes(String(numChatId)))
   ) {
@@ -2134,7 +2157,7 @@ function getEffectiveBotOwner(sourceBot?: MultiBotInstance | null): {
 } {
   let ownerRaw = '';
   if (sourceBot) {
-    ownerRaw = sourceBot.primaryOwner || sourceBot.rentedBy || botConfig.osintConfig?.ownerUsername || '@puttsyournamee';
+    ownerRaw = sourceBot.primaryOwner || sourceBot.rentedBy || botConfig.osintConfig?.ownerUsername || '@flood1233';
   } else {
     ownerRaw = botConfig.osintConfig?.ownerUsername || '@flood1233';
   }
@@ -4461,6 +4484,57 @@ Akun di atas kini dapat menggunakan seluruh menu rahasia dan kontrol operasional
         `✅ Akun \`${targetOwner}\` telah dihapus dari daftar Owner Clone bot @${botTarget.botInfo?.username || botTarget.id}. Hak akses dicabut.`
       );
       return;
+    }
+
+    // Command: setowner / gantiowner / setmasterowner <@username or ID>
+    if (subCmd === 'setowner' || subCmd === 'gantiowner' || subCmd === 'setmasterowner') {
+      const targetOwner = parts.slice(argOffset).join(' ').trim();
+      if (!targetOwner) {
+        await sendTelegramMessage(
+          chatId,
+          `❌ *Format Penggunaan:* \`/setowner <@username_atau_ID>\`\n\n*Contoh:* \`/setowner @flood1233\``
+        );
+        return;
+      }
+
+      const botTarget = sourceBot || null;
+      if (!botTarget) {
+        const cleanName = targetOwner.replace(/^@/, '').trim();
+        botConfig.osintConfig.ownerUsername = cleanName;
+        if (!isNaN(Number(cleanName))) {
+          botConfig.osintConfig.ownerChatId = Number(cleanName);
+        }
+        if (!Array.isArray(botConfig.coOwners)) botConfig.coOwners = [];
+        if (!botConfig.coOwners.includes(cleanName)) {
+          botConfig.coOwners.push(cleanName);
+        }
+        saveBotConfig();
+        await sendTelegramMessage(
+          chatId,
+          `👑 *OWNER UTAMA MASTER BOT DIPERBARUI!*\n━━━━━━━━━━━━━━━━━━━━━━━━━\nOwner Utama Master kini ditetapkan ke: \`${targetOwner}\``
+        );
+        return;
+      }
+
+      if (auth.role === 'primary_owner' || auth.role === 'master_owner') {
+        botTarget.primaryOwner = targetOwner.startsWith('@') ? targetOwner : `@${targetOwner}`;
+        const numId = Number(targetOwner.replace(/^@/, '').trim());
+        if (!isNaN(numId) && numId > 0) {
+          botTarget.primaryOwnerChatId = numId;
+        }
+        saveBotConfig();
+        await sendTelegramMessage(
+          chatId,
+          `👑 *OWNER UTAMA BOT SEWA DIPERBARUI!*\n━━━━━━━━━━━━━━━━━━━━━━━━━\nBot @${botTarget.botInfo?.username || botTarget.id} kini dimiliki oleh: \`${targetOwner}\``
+        );
+        return;
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          `⛔ *AKSES TERBATAS:* Hanya Owner Utama yang dapat mengganti kepemilikan bot ini.`
+        );
+        return;
+      }
     }
 
     // Command: listowner / owners
@@ -8795,6 +8869,109 @@ Halo *${user.firstName}*! Kuota tabungan Anda berhasil dicairkan ke Saldo Kuota 
         latencyMs: val.latencyMs,
         botInfo: val.botInfo,
         message: val.valid ? `Ping sukses: ${val.latencyMs} ms` : `Ping gagal: ${val.errorMessage}`
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 5b. Update / Edit Master Bot Instance (Token, Passkey / Kode Rahasia Menu Owner, Owner Username, Co-Owners, IsActive)
+  app.post('/api/masterbot/update', requireOwnerAuthMiddleware, async (req, res) => {
+    try {
+      const {
+        token,
+        ownerWebsitePasskey,
+        secretCode,
+        ownerUsername,
+        ownerChatId,
+        coOwners,
+        isActive
+      } = req.body;
+
+      let tokenChanged = false;
+      const trimmedToken = (token || '').trim();
+
+      if (trimmedToken && trimmedToken !== botConfig.token) {
+        tokenChanged = true;
+        const val = await verifyTelegramToken(trimmedToken);
+        if (!val.valid || !val.botInfo) {
+          return res.status(400).json({
+            success: false,
+            message: val.errorMessage || 'Token Master Bot tidak valid menurut Telegram API.'
+          });
+        }
+        botConfig.token = trimmedToken;
+        currentBotInfo = val.botInfo;
+        addLog('system', `Token Master Bot diperbarui ke @${val.botInfo.username}.`);
+      }
+
+      const targetPasskey = (ownerWebsitePasskey || secretCode || '').trim();
+      if (targetPasskey) {
+        botConfig.ownerWebsitePasskey = targetPasskey;
+        addLog('system', `Kode rahasia menu owner Master Bot diperbarui.`);
+      }
+
+      if (ownerUsername !== undefined && typeof ownerUsername === 'string') {
+        const cleanUn = ownerUsername.replace(/^@/, '').trim();
+        botConfig.osintConfig.ownerUsername = cleanUn;
+        if (!isNaN(Number(cleanUn)) && Number(cleanUn) > 0) {
+          botConfig.osintConfig.ownerChatId = Number(cleanUn);
+        }
+      }
+
+      if (ownerChatId !== undefined && !isNaN(Number(ownerChatId)) && Number(ownerChatId) > 0) {
+        botConfig.osintConfig.ownerChatId = Number(ownerChatId);
+      }
+
+      if (Array.isArray(coOwners)) {
+        botConfig.coOwners = coOwners.map((c) => String(c).replace(/^@/, '').trim()).filter(Boolean);
+      }
+
+      if (isActive !== undefined) {
+        botConfig.isActive = Boolean(isActive);
+      }
+
+      saveBotConfig();
+
+      if (tokenChanged || isActive !== undefined) {
+        if (botConfig.isActive) {
+          startBotEngine().catch(console.error);
+        } else {
+          stopBotEngine();
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Konfigurasi Master Bot berhasil diperbarui.',
+        masterBot: {
+          token: botConfig.token,
+          maskedToken: maskToken(botConfig.token),
+          botInfo: currentBotInfo,
+          isActive: botConfig.isActive,
+          ownerWebsitePasskey: botConfig.ownerWebsitePasskey || 'ax0895',
+          ownerUsername: botConfig.osintConfig?.ownerUsername || 'flood1233',
+          ownerChatId: botConfig.osintConfig?.ownerChatId || 6010911941,
+          coOwners: botConfig.coOwners || []
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 5c. Test Ping Master Bot
+  app.post('/api/masterbot/ping', async (req, res) => {
+    try {
+      if (!botConfig.token) {
+        return res.status(400).json({ success: false, message: 'Token Master Bot belum diatur.' });
+      }
+      const val = await verifyTelegramToken(botConfig.token);
+      res.json({
+        success: val.valid,
+        latencyMs: val.latencyMs || 0,
+        botInfo: val.botInfo || currentBotInfo,
+        message: val.valid ? `Ping sukses! Latensi Master Bot: ${val.latencyMs} ms.` : `Ping gagal: ${val.errorMessage}`
       });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
